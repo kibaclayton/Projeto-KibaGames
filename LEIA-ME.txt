@@ -1,0 +1,65 @@
+NEXUS PLAY LIBRARY
+
+ABRIR E ENTRAR
+Abra o atalho Minha Biblioteca de Jogos ou Abrir biblioteca.bat.
+Configure o MySQL uma vez em Configurar conexão. A conexão é protegida pela DPAPI
+do Windows em %LOCALAPPDATA%\NexusPlay\conexao.dat, fora da pasta deste aplicativo.
+Se a proteção falhar, a conexão vale apenas para a sessão e o app informa o motivo.
+Escolha o cartão do perfil e digite sua senha. Criar perfil adiciona outra biblioteca.
+As contas existentes são preservadas. A primeira conta recebe eventuais jogos antigos sem dono.
+
+GALERIA E DESTAQUES
+A biblioteca exibe apenas as capas. Clique em uma capa para abrir seus detalhes.
+O destaque mostra até quatro jogos em andamento com maior progresso, em ordem decrescente.
+Jogos com 0% ou 100%, ou status Na fila, Pausado, Abandonado ou Concluído, não entram no destaque.
+A quantidade de capas por linha muda com a largura da janela.
+Sem uma capa, um ícone gráfico aparece no lugar da imagem.
+
+COLEÇÕES
+Os grupos anteriores são convertidos automaticamente em coleções, mantendo a ordem.
+Clique em Criar coleção para adicionar uma pasta. O mosaico usa até quatro capas.
+Arraste uma capa da biblioteca até uma coleção para mover o jogo para ela.
+Cada jogo fica em uma coleção por vez. Clique na coleção para ver seus jogos.
+Clique com o botão direito na coleção para editar o nome ou excluir.
+Excluir uma coleção não exclui seus jogos. Eles permanecem na biblioteca.
+No editor, Remover da coleção desvincula o jogo. Ordem na coleção controla a sequência.
+A busca e os filtros também se aplicam à coleção aberta.
+
+DETALHES, TROFÉUS E FAVORITOS
+Clique em uma capa para abrir o editor em duas colunas.
+Nome, plataforma, progresso, datas, status, notas e cronograma ficam nos detalhes.
+Conquistas / Troféus tem Obtidos e Total. A porcentagem e os faltantes são calculados.
+Obtidos não pode superar Total. Total zero exibe 0% até você informar os valores.
+Clique em Salvar alterações para gravar. Cancelar descarta os campos editados.
+Favoritar e Remover da coleção são ações imediatas. Favoritos são individuais por perfil.
+Use Favoritos no menu lateral para filtrar.
+O status avançado prevalece sobre o percentual nos filtros, quando preenchido.
+
+CALENDÁRIO
+Clique para marcar/desmarcar um dia. Arraste entre datas para selecionar uma sequência.
+Clique no nome do dia da semana para selecionar suas ocorrências no mês exibido.
+Clique novamente no mesmo dia da semana para remover todas essas ocorrências.
+Use as setas para mudar de mês. A seleção semanal vale para aquele mês, sem repetição infinita.
+Dia avulso: círculo verde. Pontas: verde cheio. Meio: verde suave. Futuro: borda tracejada.
+Início e Término acompanham os limites da seleção; dia único deixa Término vazio.
+Editar Início/Término substitui a seleção pelo intervalo digitado. Datas futuras são planejamento.
+Limpar seleção remove os dias. Tudo é confirmado ao salvar o jogo.
+
+CAPAS
+Digite o nome do jogo e saia do campo para buscar na Wikipedia, ou use o botão de busca.
+Confira a imagem antes de usar: a fonte pode retornar outra imagem, não a capa.
+Você também pode escolher uma imagem JPG, PNG, WebP ou BMP do computador.
+As imagens são copiadas para o MySQL; não dependem do arquivo original após salvar.
+
+CONFIGURAÇÕES DE CONTA
+Clique no seu nome na barra lateral. Escolher foto do perfil mostra uma prévia circular.
+Para mudar só a foto, deixe as senhas vazias. Para trocar a senha, informe a atual,
+a nova (mínimo 8 caracteres) e a confirmação. Clique em Salvar perfil.
+A nova foto aparece na seleção dos perfis. Não há recuperação automática de senha.
+
+DADOS E REQUISITOS
+Python 3.13 com Tkinter, Pillow, MySQL Connector/Python e MySQL local na porta 3306.
+O serviço MySQL84 deve estar ativo. Internet é necessária para buscar capas e instalar componentes.
+Dados no banco biblioteca_gamer; senhas dos perfis em hashes PBKDF2 com salt individual.
+As contas separam dados no app; o administrador direto do MySQL tem acesso ao banco.
+Copiar esta pasta não copia os jogos ou perfis. Inclua biblioteca_gamer no backup do MySQL.
