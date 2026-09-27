@@ -1,0 +1,16 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+.pnpm-store/
+*.local
+.venv/
+__pycache__/
+.pytest_cache/
+data/
+work/
+*.sqlite3*
+*.migrando-*/
+backend/requirements-installed.txt
+release/
+*.spec

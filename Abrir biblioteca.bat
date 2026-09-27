@@ -1,6 +1,10 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+if exist "nexus-desktop\release\latest.txt" (
+  call "Abrir Nexus.bat"
+  exit /b
+)
 set "GAME_PYTHON=%LocalAppData%\Programs\Python\Python313\python.exe"
 if not exist "%GAME_PYTHON%" (
   echo Python nao encontrado. Instale Python 3.13 ou ajuste este arquivo.

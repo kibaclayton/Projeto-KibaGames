@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Nexus Wolfs",
+  "version": "0.1.0",
+  "identifier": "com.kibagames.nexuswolfs",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [{ "label": "main", "title": "Nexus Wolf's", "width": 1440, "height": 960, "minWidth": 800, "minHeight": 600, "backgroundColor": "#0A0B10" }],
+    "security": { "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost blob: data:; font-src 'self'; connect-src ipc: http://ipc.localhost http://127.0.0.1:8765" }
+  },
+  "bundle": { "active": false, "icon": ["icons/icon.png", "icons/icon.ico"] }
+}

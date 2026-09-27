@@ -1,0 +1,93 @@
+from contextlib import contextmanager
+from pathlib import Path
+import os
+import sqlite3
+import unicodedata
+
+SCHEMA_VERSION = 1
+
+
+def normalize(value: str) -> str:
+    return ''.join(c for c in unicodedata.normalize('NFD', value.casefold()) if not unicodedata.combining(c))
+
+
+def data_directory() -> Path:
+    if override := os.environ.get('NEXUS_DATA_DIR'):
+        return Path(override).resolve()
+    root = Path(os.environ.get('LOCALAPPDATA', str(Path.home() / '.local' / 'share')))
+    return root / 'NexusWolfs'
+
+
+SCHEMA = """
+CREATE TABLE usuarios (
+ id INTEGER PRIMARY KEY, nome TEXT NOT NULL, nome_chave TEXT NOT NULL UNIQUE,
+ senha_hash TEXT NOT NULL, avatar_id TEXT REFERENCES imagens(id),
+ criado TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE imagens (
+ id TEXT PRIMARY KEY, usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+ tipo TEXT NOT NULL CHECK(tipo IN ('capa','avatar','colecao')),
+ largura INTEGER NOT NULL, altura INTEGER NOT NULL, bytes INTEGER NOT NULL
+);
+CREATE INDEX idx_imagens_usuario ON imagens(usuario_id);
+CREATE TABLE colecoes (
+ id INTEGER PRIMARY KEY, usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+ nome TEXT NOT NULL, nome_chave TEXT NOT NULL, capa_id TEXT REFERENCES imagens(id),
+ UNIQUE(usuario_id,nome_chave), UNIQUE(id,usuario_id)
+);
+CREATE TABLE jogos (
+ id INTEGER PRIMARY KEY, usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+ nome TEXT NOT NULL, nome_chave TEXT NOT NULL, plataforma TEXT NOT NULL,
+ progresso INTEGER NOT NULL DEFAULT 0 CHECK(progresso BETWEEN 0 AND 100),
+ capa_id TEXT REFERENCES imagens(id), data_inicio TEXT, data_termino TEXT,
+ grupo TEXT NOT NULL DEFAULT '', ordem INTEGER NOT NULL DEFAULT 1 CHECK(ordem BETWEEN 1 AND 9999),
+ favorito INTEGER NOT NULL DEFAULT 0 CHECK(favorito IN (0,1)),
+ colecao_id INTEGER, trofeus_obtidos INTEGER NOT NULL DEFAULT 0,
+ trofeus_total INTEGER NOT NULL DEFAULT 0,
+ status_avancado TEXT NOT NULL DEFAULT '', notas TEXT NOT NULL DEFAULT '',
+ cronograma TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(cronograma)),
+ genero TEXT NOT NULL DEFAULT '', minutos_jogados INTEGER NOT NULL DEFAULT 0 CHECK(minutos_jogados >= 0),
+ atualizado TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+ CHECK(trofeus_obtidos >= 0 AND trofeus_obtidos <= trofeus_total AND trofeus_total <= 1000000),
+ CHECK(data_inicio IS NULL OR data_termino IS NULL OR data_termino >= data_inicio),
+ FOREIGN KEY(colecao_id,usuario_id) REFERENCES colecoes(id,usuario_id)
+);
+CREATE INDEX idx_jogos_usuario_nome ON jogos(usuario_id,nome_chave,id);
+CREATE INDEX idx_jogos_usuario_progresso ON jogos(usuario_id,progresso DESC,id);
+CREATE INDEX idx_jogos_colecao ON jogos(usuario_id,colecao_id,ordem,id);
+CREATE INDEX idx_jogos_favoritos ON jogos(usuario_id,favorito);
+CREATE TABLE migracoes (origem TEXT PRIMARY KEY, relatorio TEXT NOT NULL, criado TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+PRAGMA user_version = 1;
+"""
+
+
+class Database:
+    def __init__(self, directory: Path):
+        self.directory = Path(directory)
+        self.path = self.directory / 'nexus.sqlite3'
+
+    @contextmanager
+    def connection(self):
+        conn = sqlite3.connect(self.path, timeout=10)
+        conn.row_factory = sqlite3.Row
+        conn.execute('PRAGMA foreign_keys=ON')
+        conn.execute('PRAGMA busy_timeout=10000')
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def initialize(self):
+        self.directory.mkdir(parents=True, exist_ok=True)
+        with self.connection() as conn:
+            version = conn.execute('PRAGMA user_version').fetchone()[0]
+            if version > SCHEMA_VERSION:
+                raise RuntimeError('Banco criado por uma versão mais nova do Nexus.')
+            conn.execute('PRAGMA journal_mode=WAL')
+            if version == 0:
+                conn.executescript('BEGIN IMMEDIATE;\n' + SCHEMA + '\nCOMMIT;')
+

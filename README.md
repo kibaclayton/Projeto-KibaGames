@@ -1,5 +1,30 @@
 # Projeto-KibaGames — NEXUS PLAY LIBRARY
 
+## Nova interface: Nexus Wolf’s
+
+A versão **0.3.0** está em [nexus-desktop](nexus-desktop/README.md): React, TypeScript, Tailwind, FastAPI e SQLite, distribuídos em uma janela Windows com pywebview/WebView2. Aplicativo e navegador usam a mesma interface React. O scaffold Tauri está preservado para evolução futura.
+
+A [etapa 2](nexus-desktop/backend/README.md) implementa serviço local, perfis, WebP e importador MySQL que preserva a origem. O início da etapa 3 adiciona cards, grade/lista, favoritos, coleções, busca e editor com troféus. Veja [entrega e pendências](nexus-desktop/ATUALIZACAO-0.3.md), incluindo as funcionalidades antigas ainda não migradas.
+
+### Preparar a versão nova no Windows
+
+Instale Node.js 22.18 ou superior, pnpm 11.19, Python 3.12/3.13 de 64 bits e o runtime Microsoft Edge WebView2. Dentro de `nexus-desktop`:
+
+```powershell
+pnpm install --frozen-lockfile
+.\scripts\setup-backend.ps1
+.\.venv\Scripts\python.exe -m pip install -r backend\requirements-desktop.txt
+.\scripts\build-desktop.ps1
+```
+
+Na pasta principal, abra **Abrir Nexus.bat**. O build recompila a versão web, compara todos os arquivos empacotados e testa o EXE antes de torná-lo a versão atual. **Atualizar atalho.bat** direciona o atalho antigo da área de trabalho para o lançador novo e guarda uma cópia do atalho anterior. Distribuições, ambientes Python, credenciais e dados pessoais não são publicados no GitHub.
+
+Para importar uma biblioteca MySQL existente, feche o Nexus e abra **Importar biblioteca MySQL.bat**. A importação dos dados pessoais precisa ser executada localmente e não está concluída só por baixar este código.
+
+## Aplicativo anterior — Python/MySQL
+
+As instruções abaixo descrevem a versão anterior, preservada em **Abrir biblioteca antiga.bat**.
+
 Biblioteca pessoal de jogos para Windows, desenvolvida em **Python, Tkinter e MySQL**.
 
 ## Funcionalidades
@@ -24,7 +49,7 @@ Biblioteca pessoal de jogos para Windows, desenvolvida em **Python, Tkinter e My
 
 1. Baixe ou clone este repositório.
 2. Instale Python e MySQL; mantenha o serviço MySQL iniciado.
-3. Abra **Abrir biblioteca.bat**. Ele usa o caminho padrão de instalação do Python 3.13 para o usuário e instala componentes ausentes.
+3. Abra **Abrir biblioteca antiga.bat**. Ele usa o caminho padrão de instalação do Python 3.13 para o usuário e instala componentes ausentes.
 4. Na primeira abertura, use **Configurar conexão** e informe seu usuário e senha MySQL.
 5. Crie ou selecione um perfil.
 
