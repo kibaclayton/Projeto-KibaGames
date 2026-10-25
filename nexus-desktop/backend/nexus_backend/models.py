@@ -1,4 +1,5 @@
 from datetime import date
+from urllib.parse import urlsplit
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -22,10 +23,28 @@ class ProfileCreate(Model):
 class Login(Model):
     perfil_id: int = Field(gt=0)
     senha: str = Field(min_length=1, max_length=256)
+    lembrar: bool = False
+    aparelho: str = Field(default='', max_length=80)
+
+
+class DeviceToken(Model):
+    token: str = Field(min_length=20, max_length=128)
 
 
 class PasswordChange(Model):
     senha_atual: str = Field(min_length=1, max_length=256)
+    nova_senha: str = Field(min_length=8, max_length=256)
+    confirmar_senha: str = Field(min_length=8, max_length=256)
+
+    @model_validator(mode='after')
+    def confirm(self):
+        if self.nova_senha != self.confirmar_senha:
+            raise ValueError('A confirmação da senha não confere.')
+        return self
+
+
+class PasswordReset(Model):
+    """Esqueci a senha: só a senha nova, sem a atual; o endpoint restringe a origem a este computador."""
     nova_senha: str = Field(min_length=8, max_length=256)
     confirmar_senha: str = Field(min_length=8, max_length=256)
 
@@ -70,6 +89,14 @@ class GameInput(Model):
     cronograma: dict[str, Literal['single', 'range']] = Field(default_factory=dict, max_length=10000)
     genero: str = Field(default='', max_length=80)
     minutos_jogados: int = Field(default=0, ge=0, le=100000000)
+    # Ficha vinda de fontes externas; opcional e editável. Nunca inclui progresso, status, notas, troféus ou datas pessoais.
+    data_lancamento: date | None = None
+    desenvolvedor: str = Field(default='', max_length=200)
+    publicadora: str = Field(default='', max_length=200)
+    descricao: str = Field(default='', max_length=4000)
+    fonte_externa: Literal['', 'steam', 'wikipedia'] = ''
+    id_externo: str = Field(default='', max_length=64, pattern=r'^[A-Za-z0-9:_-]*$')
+    url_origem: str = Field(default='', max_length=2048)
 
     @field_validator('nome', 'plataforma')
     @classmethod
@@ -77,6 +104,23 @@ class GameInput(Model):
         if not value.strip():
             raise ValueError('Campo vazio.')
         return value.strip()
+
+    @field_validator('url_origem')
+    @classmethod
+    def https_origin(cls, value):
+        value = value.strip()
+        if not value:
+            return value
+        parts = urlsplit(value)
+        if parts.scheme != 'https' or not parts.hostname or parts.username or parts.password or parts.port not in (None, 443) or any(c.isspace() or ord(c) < 32 for c in value):
+            raise ValueError('A página de origem precisa ser um endereço HTTPS simples, sem credenciais ou porta alternativa.')
+        return value
+
+    @model_validator(mode='after')
+    def external_identity(self):
+        if bool(self.fonte_externa) != bool(self.id_externo):
+            raise ValueError('Fonte externa e identificador externo precisam vir juntos.')
+        return self
 
     @field_validator('cronograma')
     @classmethod
@@ -101,6 +145,18 @@ class Crop(Model):
     y: int = Field(ge=0)
     width: int = Field(gt=0)
     height: int = Field(gt=0)
+
+
+class NetworkInput(Model):
+    ativo: bool
+    porta: int | None = Field(default=None, ge=1024, le=65535)
+
+
+class CandidateRef(Model):
+    """Resultado escolhido na busca: identidade do provedor, nunca uma URL livre vinda da interface."""
+    fonte: Literal['steam', 'wikipedia']
+    id: str = Field(min_length=1, max_length=64, pattern=r'^[A-Za-z0-9:_-]+$')
+    jogo_id: int | None = Field(default=None, gt=0)
 
 
 class RemoteImage(Model):

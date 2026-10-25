@@ -131,7 +131,8 @@ def migrate_records(records, destination: Path, schemas=None, owner_for_unassign
 
 
 def saved_credentials():
-    module_path = Path(__file__).resolve().parents[3] / 'conexao_segura.py'
+    raiz = Path(__file__).resolve().parents[3]
+    module_path = next((c for c in (raiz / 'conexao_segura.py', raiz / 'legado' / 'conexao_segura.py') if c.is_file()), raiz / 'legado' / 'conexao_segura.py')
     spec = importlib.util.spec_from_file_location('nexus_legacy_connection', module_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

@@ -1,0 +1,109 @@
+{
+    "gerado":  "2026-10-24T18:20:15",
+    "maquina":  {
+                    "ram_gb":  63.2,
+                    "cores":  8,
+                    "build_nexus":  "20261023-212434",
+                    "windows":  "Microsoft Windows 11 Pro"
+                },
+    "parametros":  {
+                       "rodadas":  3,
+                       "ocioso_s":  20
+                   },
+    "amostras":  [
+                     {
+                         "app":  "Nexus Wolfs (instalado)",
+                         "rodada":  1,
+                         "inicio":  "2026-10-24T18:17:42",
+                         "ate_api_s":  1.26,
+                         "ate_janela_s":  0.22,
+                         "cpu_abertura_s":  1.91,
+                         "processos":  7,
+                         "ws_mb":  464.1,
+                         "privado_mb":  275.3,
+                         "cpu_ocioso_s":  1.09,
+                         "cpu_ocioso_pct":  0.68
+                     },
+                     {
+                         "app":  "Nexus Wolfs (instalado)",
+                         "rodada":  2,
+                         "inicio":  "2026-10-24T18:18:09",
+                         "ate_api_s":  1.05,
+                         "ate_janela_s":  0.12,
+                         "cpu_abertura_s":  1.67,
+                         "processos":  7,
+                         "ws_mb":  454.3,
+                         "privado_mb":  262.7,
+                         "cpu_ocioso_s":  0.63,
+                         "cpu_ocioso_pct":  0.39
+                     },
+                     {
+                         "app":  "Nexus Wolfs (instalado)",
+                         "rodada":  3,
+                         "inicio":  "2026-10-24T18:18:35",
+                         "ate_api_s":  0.52,
+                         "ate_janela_s":  0.7,
+                         "cpu_abertura_s":  1.81,
+                         "processos":  7,
+                         "ws_mb":  454.1,
+                         "privado_mb":  262.4,
+                         "cpu_ocioso_s":  0.5,
+                         "cpu_ocioso_pct":  0.31
+                     },
+                     {
+                         "app":  "Biblioteca antiga (Tkinter/MySQL)",
+                         "rodada":  1,
+                         "inicio":  "2026-10-24T18:19:01",
+                         "ate_api_s":  null,
+                         "ate_janela_s":  0.87,
+                         "cpu_abertura_s":  0.45,
+                         "processos":  2,
+                         "ws_mb":  72.7,
+                         "privado_mb":  38.4,
+                         "cpu_ocioso_s":  0,
+                         "cpu_ocioso_pct":  0
+                     },
+                     {
+                         "app":  "Biblioteca antiga (Tkinter/MySQL)",
+                         "rodada":  2,
+                         "inicio":  "2026-10-24T18:19:26",
+                         "ate_api_s":  null,
+                         "ate_janela_s":  0.93,
+                         "cpu_abertura_s":  0.41,
+                         "processos":  2,
+                         "ws_mb":  73,
+                         "privado_mb":  38.6,
+                         "cpu_ocioso_s":  0,
+                         "cpu_ocioso_pct":  0
+                     },
+                     {
+                         "app":  "Biblioteca antiga (Tkinter/MySQL)",
+                         "rodada":  3,
+                         "inicio":  "2026-10-24T18:19:50",
+                         "ate_api_s":  null,
+                         "ate_janela_s":  0.91,
+                         "cpu_abertura_s":  0.42,
+                         "processos":  2,
+                         "ws_mb":  73.1,
+                         "privado_mb":  38.8,
+                         "cpu_ocioso_s":  0,
+                         "cpu_ocioso_pct":  0
+                     }
+                 ],
+    "mysqld":  {
+                   "processos":  2,
+                   "ws_mb":  442.8,
+                   "privado_mb":  670.5,
+                   "cpu_s":  0
+               },
+    "disco_bytes":  {
+                        "Nexus: aplicativo instalado":  66922385,
+                        "Nexus: biblioteca (banco + imagens + backups + webview)":  51188546,
+                        "Nexus: só banco e imagens":  880246,
+                        "Antigo: código do aplicativo":  78059,
+                        "Antigo: Python 3.13 + pacotes":  238431070,
+                        "Antigo: MySQL Server (programa)":  604164667,
+                        "Antigo: MySQL dados (biblioteca_gamer)":  null,
+                        "Antigo: MySQL dados (tudo)":  null
+                    }
+}

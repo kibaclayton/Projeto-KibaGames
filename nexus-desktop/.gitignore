@@ -13,4 +13,5 @@ work/
 *.migrando-*/
 backend/requirements-installed.txt
 release/
+*.zip
 *.spec

@@ -4,7 +4,7 @@ import os
 import sqlite3
 import unicodedata
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 4
 
 
 def normalize(value: str) -> str:
@@ -60,6 +60,39 @@ CREATE TABLE migracoes (origem TEXT PRIMARY KEY, relatorio TEXT NOT NULL, criado
 PRAGMA user_version = 1;
 """
 
+# Migrações incrementais: cada entrada leva o banco da versão anterior para a sua. Nunca remova colunas nem dados.
+MIGRATIONS = {
+    2: """
+CREATE TABLE aparelhos (
+ id INTEGER PRIMARY KEY, usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+ token_hash TEXT NOT NULL UNIQUE, nome TEXT NOT NULL DEFAULT '',
+ criado TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+ ultimo_uso TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+ expira TEXT NOT NULL
+);
+CREATE INDEX idx_aparelhos_usuario ON aparelhos(usuario_id);
+PRAGMA user_version = 2;
+""",
+    3: """
+ALTER TABLE aparelhos ADD COLUMN hash_anterior TEXT;
+ALTER TABLE aparelhos ADD COLUMN rotacionado TEXT;
+PRAGMA user_version = 3;
+""",
+    # Ficha do jogo vinda de fontes externas (Steam, Wikidata). Todos opcionais; data de lançamento é da obra, nunca da
+    # jornada pessoal (data_inicio/data_termino continuam sendo quando a pessoa começou e terminou de jogar).
+    4: """
+ALTER TABLE jogos ADD COLUMN data_lancamento TEXT;
+ALTER TABLE jogos ADD COLUMN desenvolvedor TEXT NOT NULL DEFAULT '';
+ALTER TABLE jogos ADD COLUMN publicadora TEXT NOT NULL DEFAULT '';
+ALTER TABLE jogos ADD COLUMN descricao TEXT NOT NULL DEFAULT '';
+ALTER TABLE jogos ADD COLUMN fonte_externa TEXT NOT NULL DEFAULT '';
+ALTER TABLE jogos ADD COLUMN id_externo TEXT NOT NULL DEFAULT '';
+ALTER TABLE jogos ADD COLUMN url_origem TEXT NOT NULL DEFAULT '';
+CREATE INDEX idx_jogos_externo ON jogos(usuario_id,fonte_externa,id_externo);
+PRAGMA user_version = 4;
+""",
+}
+
 
 class Database:
     def __init__(self, directory: Path):
@@ -90,4 +123,7 @@ class Database:
             conn.execute('PRAGMA journal_mode=WAL')
             if version == 0:
                 conn.executescript('BEGIN IMMEDIATE;\n' + SCHEMA + '\nCOMMIT;')
+                version = 1
+            for target in range(version + 1, SCHEMA_VERSION + 1):
+                conn.executescript('BEGIN IMMEDIATE;\n' + MIGRATIONS[target] + '\nCOMMIT;')
 

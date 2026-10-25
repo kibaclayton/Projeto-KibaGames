@@ -1,5 +1,6 @@
 fastapi>=0.115,<1
 uvicorn>=0.34,<1
 Pillow>=12.1,<13
+cryptography>=44,<47
 mysql-connector-python>=9,<28
 

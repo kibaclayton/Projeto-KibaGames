@@ -5,7 +5,12 @@ import { Brand } from './components/Brand';
 import { Button, Modal, Panel } from './components/ui';
 import { useTheme } from './theme/ThemeProvider';
 import { LibraryView } from './features/library/LibraryView';
+import { AccountPanel } from './components/AccountPanel';
+import { AvatarImage } from './components/AvatarImage';
 import { BackendPanel } from './components/BackendPanel';
+import { MaintenancePanel } from './components/MaintenancePanel';
+import { NetworkPanel } from './components/NetworkPanel';
+import { UpdatePanel } from './components/UpdatePanel';
 import { useBackend } from './services/BackendProvider';
 
 const pages = [
@@ -33,7 +38,7 @@ export function App() {
         <p className="eyebrow nav-caption">SEU UNIVERSO</p>
         <nav aria-label="Navegação principal">{pages.map(({ id, label, icon: Icon }) => <button key={id} className={`nav-item ${page === id ? 'active' : ''}`} aria-current={page === id ? 'page' : undefined} onClick={() => navigate(id)}><Icon size={19} /><span>{label}</span>{page === id && <span className="active-dot" />}</button>)}</nav>
         <div className="sidebar-bottom"><div className="foundation-note"><span className="status-dot" /> NOVA JORNADA <small>Uma nova casa para seus jogos.</small></div>
-          <button className="profile-entry" onClick={() => setSettingsOpen(true)}><span className="avatar"><UserRound size={20} /></span><span><strong>{session?.perfil.nome ?? 'Entrar no perfil'}</strong><small>Conta e preferências</small></span><Settings2 size={17} /></button>
+          <button className="profile-entry" onClick={() => setSettingsOpen(true)}>{session ? <AvatarImage profileId={session.perfil.id} avatarId={session.perfil.avatar_id} name={session.perfil.nome} /> : <span className="avatar"><UserRound size={20} /></span>}<span><strong>{session?.perfil.nome ?? 'Entrar no perfil'}</strong><small>Conta e preferências</small></span><Settings2 size={17} /></button>
         </div>
       </div>
     </aside>
@@ -45,7 +50,7 @@ export function App() {
         <footer className="page-footer"><span>NEXUS WOLF’S</span><span>Feito para a sua próxima aventura.</span></footer>
       </main>
     </div>
-    <Modal open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Conta e preferências">{settingsOpen && <BackendPanel />}<div className="preference-row"><div><h3>Aparência</h3><p className="muted">Tema {theme === 'dark' ? 'escuro' : 'claro'}</p></div><Button onClick={toggleTheme}>{theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />} Alternar tema</Button></div></Modal>
+    <Modal open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Conta e preferências">{settingsOpen && <BackendPanel />}{settingsOpen && <AccountPanel />}{settingsOpen && <NetworkPanel />}{settingsOpen && <MaintenancePanel />}{settingsOpen && <UpdatePanel />}<div className="preference-row"><div><h3>Aparência</h3><p className="muted">Tema {theme === 'dark' ? 'escuro' : 'claro'}</p></div><Button onClick={toggleTheme}>{theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />} Alternar tema</Button></div></Modal>
   </div>;
 }
 

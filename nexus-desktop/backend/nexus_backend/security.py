@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import re
@@ -6,6 +7,59 @@ import threading
 import time
 
 LEGACY_HASH = re.compile(r'^[0-9a-f]{32}:[0-9a-f]{64}$')
+DEVICE_DAYS = 90
+ROTATION_GRACE_SECONDS = 60
+
+
+def utc_stamp(moment: datetime | None = None) -> str:
+    moment = moment or datetime.now(timezone.utc)
+    return moment.strftime('%Y-%m-%dT%H:%M:%S.') + f'{moment.microsecond // 1000:03d}Z'
+
+
+def remember_device(conn, user_id: int, name: str) -> dict:
+    """Credencial de longa duração para 'lembrar neste aparelho': só o hash fica no banco."""
+    token = secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc)
+    cursor = conn.execute('INSERT INTO aparelhos(usuario_id,token_hash,nome,criado,ultimo_uso,expira) VALUES(?,?,?,?,?,?)',
+                          (user_id, Sessions.digest(token), name[:80], utc_stamp(now), utc_stamp(now), utc_stamp(now + timedelta(days=DEVICE_DAYS))))
+    return {'id': cursor.lastrowid, 'token': token}
+
+
+def device_login(conn, token: str) -> dict | None:
+    """Troca a credencial do aparelho por outra (rotação) e devolve o dono; expiradas são apagadas.
+
+    Logo após uma rotação, a credencial anterior ainda vale por alguns segundos e devolve apenas uma sessão, sem
+    credencial nova: cobre pedidos simultâneos, duas abas do mesmo aparelho e um app fechado no meio da troca.
+    """
+    digest = Sessions.digest(token)
+    now = datetime.now(timezone.utc)
+    row = conn.execute('SELECT id,usuario_id,expira FROM aparelhos WHERE token_hash=?', (digest,)).fetchone()
+    if row:
+        if row['expira'] <= utc_stamp(now):
+            conn.execute('DELETE FROM aparelhos WHERE id=?', (row['id'],))
+            return None
+        fresh = secrets.token_urlsafe(32)
+        conn.execute('UPDATE aparelhos SET token_hash=?,hash_anterior=?,rotacionado=?,ultimo_uso=?,expira=? WHERE id=?',
+                     (Sessions.digest(fresh), digest, utc_stamp(now), utc_stamp(now), utc_stamp(now + timedelta(days=DEVICE_DAYS)), row['id']))
+        return {'id': row['id'], 'user_id': row['usuario_id'], 'token': fresh}
+    grace = conn.execute('SELECT id,usuario_id FROM aparelhos WHERE hash_anterior=? AND rotacionado>=? AND expira>?',
+                         (digest, utc_stamp(now - timedelta(seconds=ROTATION_GRACE_SECONDS)), utc_stamp(now))).fetchone()
+    if grace:
+        return {'id': grace['id'], 'user_id': grace['usuario_id'], 'token': None}
+    return None
+
+
+def list_devices(conn, user_id: int) -> list[dict]:
+    conn.execute('DELETE FROM aparelhos WHERE usuario_id=? AND expira<=?', (user_id, utc_stamp()))
+    return [dict(r) for r in conn.execute('SELECT id,nome,criado,ultimo_uso,expira FROM aparelhos WHERE usuario_id=? ORDER BY ultimo_uso DESC', (user_id,))]
+
+
+def forget_device(conn, user_id: int, device_id: int) -> bool:
+    return conn.execute('DELETE FROM aparelhos WHERE id=? AND usuario_id=?', (device_id, user_id)).rowcount > 0
+
+
+def forget_devices(conn, user_id: int):
+    conn.execute('DELETE FROM aparelhos WHERE usuario_id=?', (user_id,))
 
 
 def encode_password(password: str, salt: str | None = None) -> str:
@@ -60,6 +114,10 @@ class Sessions:
     def revoke_user(self, user_id):
         with self.lock:
             self.entries = {k: v for k, v in self.entries.items() if v[0] != user_id}
+
+    def revoke_all(self):
+        with self.lock:
+            self.entries = {}
 
     def allow_attempt(self, user_id):
         with self.lock:

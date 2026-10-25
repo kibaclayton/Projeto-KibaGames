@@ -8,7 +8,7 @@ import { GameCard } from './GameCard';
 import { GameEditor } from './GameEditor';
 
 export function LibraryView({ section, onLogin }: { section: 'library' | 'favorites' | 'collections'; onLogin: () => void }) {
-  const { session, api, refreshSummary } = useBackend();
+  const { session, api, refreshSummary, restoring } = useBackend();
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
   const [genre, setGenre] = useState('');
@@ -66,6 +66,7 @@ export function LibraryView({ section, onLogin }: { section: 'library' | 'favori
     finally { setCollectionBusy(false); }
   }
 
+  if (!session && restoring) return <Panel className="empty-state" aria-busy="true"><div className="empty-icon"><Gamepad2 size={30} /></div><h2>Entrando…</h2><p role="status">Reconhecendo o perfil lembrado neste aparelho.</p></Panel>;
   if (!session) return <Panel className="empty-state"><div className="empty-icon"><Gamepad2 size={30} /></div><h2>Seu próximo mundo está aqui</h2><p>Selecione seu perfil para explorar seus jogos e coleções.</p><Button variant="primary" onClick={onLogin}>Escolher meu perfil</Button></Panel>;
   const selectedCollection = collections.find(c => c.id === collectionId);
   const featured = highlights[0];

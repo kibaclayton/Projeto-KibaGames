@@ -2,13 +2,17 @@
 
 ## Atualização atual: etapa 2 e início da etapa 3
 
-O app agora possui executável Windows com serviço integrado e biblioteca conectada: cards, busca, favoritos, coleções e edição. Abra `../Abrir Nexus.bat`. Consulte [ATUALIZACAO-0.3.md](ATUALIZACAO-0.3.md) para entrega, testes, importação e pendências. As seções históricas abaixo descrevem a etapa 1 e não representam o estado atual.
+O app agora possui executável Windows com serviço integrado e biblioteca conectada: cards, busca, favoritos, coleções, edição e calendário de sessões de jogo (`src/features/library/GameCalendar.tsx` e `schedule.ts`). Abra `../Abrir Nexus.bat`. O acesso pelo celular na rede local (HTTPS com certificado próprio, desligado por padrão, instalável como PWA) as configurações da conta (foto de perfil com recorte em `src/components/AvatarCropper.tsx`, troca de senha e expiração de sessão) a capa automática pelo nome do jogo e a ficha preenchida ao escolher um resultado (Steam e Wikipedia/Wikidata, em `backend/nexus_backend/covers.py`, `platforms.py`, `src/features/library/CoverSearch.tsx` e `coverModel.ts`) estão descritos em [ATUALIZACAO-0.3.md](ATUALIZACAO-0.3.md). Consulte [ATUALIZACAO-0.3.md](ATUALIZACAO-0.3.md) para entrega, testes, importação e pendências. As seções históricas abaixo descrevem a etapa 1 e não representam o estado atual.
 
 ## Atualização: etapa 2 implementada
 
 Backend FastAPI/SQLite, migração MySQL, processamento WebP e login de perfis estão implementados. Veja [instruções completas da etapa 2](backend/README.md) para iniciar, importar os dados e testar. As seções abaixo registram a entrega visual da etapa 1; seus limites de backend foram substituídos pela documentação da etapa 2.
 
 Base desktop React + TypeScript + Vite, Tailwind CSS e Tauri 2. Esta etapa cria a estrutura e o Design System do documento arquitetural. O aplicativo Python/MySQL continua no diretório superior.
+
+## Instalador e atualizador
+
+`scripts/build-desktop.ps1` gera, além da release portátil, `release/NexusWolfs-Setup-<versão>-<build>.exe` (Inno Setup 6, por usuário, sem administrador; biblioteca em `%LOCALAPPDATA%\NexusWolfs`, importada da pasta portátil na primeira abertura) e o pacote de atualização `release/<build>.zip` com `release/atualizacao.json`. O aplicativo instalado verifica esse canal em *Conta e preferências → Versão e atualizações*, prepara a versão nova com hash e autoteste, aplica só com confirmação e permite reverter. Detalhes em [ATUALIZACAO-0.3.md](ATUALIZACAO-0.3.md).
 
 ## Executar a interface
 

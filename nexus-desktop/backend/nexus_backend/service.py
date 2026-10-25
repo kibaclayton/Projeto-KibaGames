@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from .database import normalize
 from .models import GameInput
 
-SUMMARY_COLUMNS = 'id,nome,plataforma,progresso,capa_id,data_inicio,data_termino,ordem,favorito,colecao_id,trofeus_obtidos,trofeus_total,status_avancado,genero,minutos_jogados,atualizado'
+SUMMARY_COLUMNS = 'id,nome,plataforma,progresso,capa_id,data_inicio,data_termino,ordem,favorito,colecao_id,trofeus_obtidos,trofeus_total,status_avancado,genero,minutos_jogados,data_lancamento,desenvolvedor,publicadora,fonte_externa,id_externo,atualizado'
 
 
 def owned(conn, table, row_id, user_id):
@@ -56,6 +56,15 @@ def save_game(conn, model: GameInput, user_id: int, game_id: int | None = None):
         owned(conn, 'jogos', game_id, user_id)
         conn.execute(f"UPDATE jogos SET {','.join(key + '=?' for key in values)}, atualizado=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND usuario_id=?", (*values.values(), game_id, user_id))
     return game_result(owned(conn, 'jogos', game_id, user_id))
+
+
+def find_duplicate(conn, user_id: int, source: str, external_id: str, exclude_game: int | None = None):
+    """Outro jogo do mesmo perfil já ligado a este resultado externo; aviso, não bloqueio (edições diferentes existem)."""
+    if not source or not external_id:
+        return None
+    row = conn.execute('SELECT id,nome,plataforma FROM jogos WHERE usuario_id=? AND fonte_externa=? AND id_externo=? AND id IS NOT ? ORDER BY id LIMIT 1',
+                       (user_id, source, external_id, exclude_game)).fetchone()
+    return dict(row) if row else None
 
 
 def save_collection(conn, model, user_id, collection_id=None):

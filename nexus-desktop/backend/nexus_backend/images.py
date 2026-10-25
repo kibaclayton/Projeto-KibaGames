@@ -50,13 +50,23 @@ class PinnedHTTPS(http.client.HTTPSConnection):
             raise
 
 
-def download_image(url: str) -> bytes:
-    deadline = time.monotonic() + 25
+USER_AGENT = 'NexusWolfs/0.3 (biblioteca pessoal de jogos; aplicativo local)'
+IMAGE_TYPES = ('image/jpeg', 'image/png', 'image/webp')
+
+
+def fetch(url: str, accept: str, content_types: tuple[str, ...], max_bytes: int, allowed_hosts: set[str] | None = None, seconds: float = 25) -> tuple[str, bytes]:
+    """Fetch over HTTPS with a validated public IP pinned to the TLS hostname, revalidating every redirect.
+
+    `allowed_hosts`, when given, restricts both the first URL and each redirect to a closed list of hostnames.
+    """
+    deadline = time.monotonic() + seconds
     for _ in range(4):
         host, ip, path = validated_address(url)
+        if allowed_hosts is not None and host not in allowed_hosts:
+            raise ValueError('Endereço fora das fontes permitidas.')
         connection = PinnedHTTPS(host, ip)
         try:
-            connection.request('GET', path, headers={'User-Agent': 'NexusWolfs/0.2', 'Accept': 'image/png,image/jpeg,image/webp'})
+            connection.request('GET', path, headers={'User-Agent': USER_AGENT, 'Accept': accept})
             response = connection.getresponse()
             if response.status in (301, 302, 303, 307, 308):
                 location = response.getheader('Location')
@@ -65,20 +75,30 @@ def download_image(url: str) -> bytes:
                 url = urljoin(url, location)
                 continue
             if response.status != 200:
-                raise ValueError(f'O servidor da imagem respondeu HTTP {response.status}.')
-            if response.getheader('Content-Type', '').split(';')[0].lower() not in ('image/jpeg', 'image/png', 'image/webp'):
+                raise ValueError(f'O servidor respondeu HTTP {response.status}.')
+            content_type = response.getheader('Content-Type', '').split(';')[0].lower()
+            if content_type not in content_types:
                 raise ValueError('O link deve apontar à imagem, não a uma página do Google ou de outro site.')
-            if int(response.getheader('Content-Length', '0')) > MAX_BYTES:
-                raise ValueError('A imagem deve ter até 10 MB.')
+            if int(response.getheader('Content-Length', '0')) > max_bytes:
+                raise ValueError('Conteúdo acima do limite permitido.')
             data = bytearray()
-            while chunk := response.read(min(65536, MAX_BYTES + 1 - len(data))):
+            while chunk := response.read(min(65536, max_bytes + 1 - len(data))):
                 data.extend(chunk)
-                if len(data) > MAX_BYTES or time.monotonic() > deadline:
+                if len(data) > max_bytes or time.monotonic() > deadline:
                     raise ValueError('Download muito grande ou demorado.')
-            return bytes(data)
+            return content_type, bytes(data)
         finally:
             connection.close()
-    raise ValueError('A imagem redirecionou muitas vezes.')
+    raise ValueError('O endereço redirecionou muitas vezes.')
+
+
+def download_image(url: str) -> bytes:
+    try:
+        return fetch(url, 'image/png,image/jpeg,image/webp', IMAGE_TYPES, MAX_BYTES)[1]
+    except ValueError as exc:
+        if 'limite' in str(exc):
+            raise ValueError('A imagem deve ter até 10 MB.') from exc
+        raise
 
 
 def convert_image(data: bytes, kind: str, crop: Crop | None = None) -> tuple[bytes, bytes, int, int]:

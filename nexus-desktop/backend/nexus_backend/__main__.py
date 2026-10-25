@@ -9,7 +9,12 @@ def main():
     args = parser.parse_args()
     import uvicorn
     from .api import create_app
-    uvicorn.run(create_app(args.data_dir), host='127.0.0.1', port=args.port, access_log=False, log_level='warning')
+    app = create_app(args.data_dir)
+    app.state.network.start_if_enabled()
+    try:
+        uvicorn.run(app, host='127.0.0.1', port=args.port, access_log=False, log_level='warning')
+    finally:
+        app.state.network.stop()
 
 
 if __name__ == '__main__':

@@ -32,7 +32,9 @@ O launcher escolhe `data/biblioteca-importada` quando existe uma importação co
 - `origem-mysql.sqlite3`: cópia de recuperação dos registros MySQL, criada na importação, incluindo colunas originais e imagens originais sem recompressão.
 - `relatorio-migracao.json`: contagens e verificações da importação.
 
-Dados, backups, ambiente Python, downloads de dependências e logs ficam ignorados pelo Git. Copie a pasta de dados inteira com o serviço encerrado para um backup manual consistente. SQLite e imagens não são criptografados em disco; use as permissões e a proteção do usuário Windows. Não compartilhe backups ou arquivos da pasta de dados.
+- `backups/nexus-backup-*.zip`: backups criados pela interface (banco, imagens e manifesto com hashes); copie um ZIP para cá para restaurá-lo.
+
+Dados, backups, ambiente Python, downloads de dependências e logs ficam ignorados pelo Git. Copie a pasta de dados inteira com o serviço encerrado para um backup manual consistente, ou use *Backup e recuperação* na interface, que funciona com o aplicativo aberto. SQLite e imagens não são criptografados em disco; use as permissões e a proteção do usuário Windows. Não compartilhe backups ou arquivos da pasta de dados.
 
 ## Migração MySQL → SQLite
 
@@ -65,7 +67,8 @@ O snapshot não é um dump de todo o servidor MySQL; é a cópia completa das tr
 
 - Hash PBKDF2-HMAC-SHA256 com 600.000 iterações e salt individual de 16 bytes, compatível com o legado; comparação em tempo constante.
 - Senhas novas de 8 a 256 caracteres; troca exige senha atual e confirmação.
-- Tokens aleatórios com 256 bits; somente o hash é mantido em memória por até 12 horas. Logout revoga a sessão; troca de senha revoga todas as sessões do perfil. Reiniciar o backend exige novo login.
+- Tokens aleatórios com 256 bits; somente o hash é mantido em memória por até 12 horas. Logout revoga a sessão; troca de senha revoga todas as sessões do perfil. Reiniciar o backend exige novo login, exceto em aparelhos lembrados.
+- "Lembrar neste aparelho": credencial de 256 bits por aparelho, guardada só como hash SHA-256 na tabela `aparelhos`, rotacionada a cada uso, válida por 90 dias sem uso; sair esquece o aparelho, trocar a senha esquece todos. Por 60 s após a rotação, a credencial anterior ainda abre sessão sem receber credencial nova. O esquema do banco está na versão 4 (migrações incrementais em `database.MIGRATIONS`; a v4 acrescenta a ficha do jogo: lançamento, estúdios, descrição e identificador externo).
 - A interface mantém o token apenas em memória. Ela salva o perfil no SQLite, não a senha nem o token no navegador.
 - Até cinco tentativas de autenticação por perfil por minuto.
 - Operações de jogos, imagens e coleções sempre verificam o dono. O banco também impede jogos vinculados a uma coleção de outro usuário.
@@ -80,7 +83,11 @@ Contrato interativo: `http://127.0.0.1:8765/docs`; JSON: `/openapi.json`. A docu
 |---|---|
 | GET `/api/saude` | Versão, SQLite e versão do esquema |
 | GET/POST `/api/perfis` | Selecionar/criar perfil |
-| POST/DELETE `/api/sessao` | Login/logout |
+| POST/DELETE `/api/sessao` | Login (com `lembrar` e `aparelho` opcionais) / logout |
+| POST `/api/sessao/aparelho` | Entrar com a credencial de um aparelho lembrado; devolve sessão e credencial nova (rotação) |
+| GET/DELETE `/api/conta/aparelhos` | Listar / esquecer todos os aparelhos lembrados do perfil |
+| DELETE `/api/conta/aparelhos/{id}` | Esquecer um aparelho |
+| PUT `/api/perfis/{id}/redefinir-senha` | "Esqueci a senha": senha nova + confirmação, sem a atual; só aceito de 127.0.0.1 (nunca pelo celular/rede), 3 por perfil a cada 5 min; revoga sessões e aparelhos lembrados do perfil e registra o evento |
 | GET `/api/conta` | Perfil autenticado |
 | PUT `/api/conta/senha` | Senha atual, nova senha e confirmação |
 | PUT `/api/conta/avatar` | Vincular imagem de avatar ou remover vínculo com `null` |
@@ -94,6 +101,26 @@ Contrato interativo: `http://127.0.0.1:8765/docs`; JSON: `/openapi.json`. A docu
 | POST `/api/imagens/url` | Baixar imagem HTTPS direta e converter |
 | GET `/api/imagens/{id}?miniatura=true` | Imagem do perfil autenticado |
 | GET `/api/perfis/{id}/avatar` | Miniatura para seleção de perfil |
+| GET `/api/acesso-rede` | Estado do acesso pela rede local: ativo, porta, endereços, certificado, erro |
+| PUT `/api/acesso-rede` | Liga/desliga o listener HTTPS (`ativo`, `porta` opcional); só aceito de 127.0.0.1 |
+| GET `/api/acesso-rede/ca.crt` | Certificado público da autoridade local, para instalar no celular |
+| GET `/api/atualizacao` | Versão, build, modo (instalado/portátil), canal, atualização disponível/preparada, versão anterior |
+| POST `/api/atualizacao/verificar|preparar|aplicar|reverter` | Atualizador do aplicativo instalado (hash + autoteste; aplicar/reverter fecham o app) |
+| GET/POST `/api/manutencao/backups` | Listar / criar backup (ZIP com banco, imagens e manifesto); só de 127.0.0.1 |
+| GET/DELETE `/api/manutencao/backups/{nome}` | Baixar / excluir um backup |
+| POST `/api/manutencao/backups/{nome}/restaurar` | Validar, fazer backup de segurança e restaurar; revoga todas as sessões |
+| GET `/api/manutencao/integridade` | `integrity_check`, `foreign_key_check`, contagens e esquema |
+| GET `/api/manutencao/orfas`, POST `/orfas/limpar` | Contar / apagar imagens sem uso (com backup de segurança antes) |
+| GET `/api/capas/busca` | Candidatos de capa pelo nome (`nome`, `fonte` = todas, steam ou wikipedia); até 20 por minuto por perfil |
+| GET `/api/capas/previa` | Prévia de um candidato, buscada pelo serviço; só hosts de imagem das fontes |
+
+## Capas pelo nome
+
+`covers.py` consulta a loja Steam e a Wikipedia (pt, depois en) sem chave de API, usando `images.fetch` com lista fechada de hosts, e devolve candidatos com imagem, prévia e página de origem; só URLs dos hosts de imagem de cada fonte são aceitas. A interface baixa a escolha por `POST /api/imagens/url`. Detalhes, limitações e atribuição: [ATUALIZACAO-0.3.md](../ATUALIZACAO-0.3.md).
+
+## Acesso pela rede local
+
+Desligado por padrão. Ao ligar, o mesmo aplicativo passa a escutar também em HTTPS (`0.0.0.0`, porta escolhida, padrão 8443) com um certificado emitido por uma autoridade criada na pasta de dados (`certificados/nexus-ca.crt`; chaves privadas ao lado, nunca servidas). A preferência fica em `acesso-rede.json` e é reaplicada na abertura por `desktop.py` e por `python -m nexus_backend`. O cabeçalho `Host` só é aceito para loopback e para os endereços anunciados pelo listener; `Origin` precisa coincidir com a própria origem (`http` ou `https`). A geração dos certificados usa `cryptography`. Detalhes de uso: [ATUALIZACAO-0.3.md](../ATUALIZACAO-0.3.md).
 
 `GET /api/jogos` aceita `busca`, `genero`, `favorito`, `colecao_id`, `pagina` e `limite` (1–100, padrão 40). Texto é normalizado sem acentos e diferenças de caixa; `%` e `_` são literais, não curingas. Busca e gênero se combinam com **E**. Listas não carregam BLOBs, notas ou cronogramas. Índices atendem usuário, nome, favoritos, progresso e coleção. O debounce de 300 ms será ligado à busca visual na etapa de cards.
 
@@ -107,7 +134,7 @@ Para arrastar um jogo para uma coleção, o futuro componente chama `PATCH /api/
 - Recorte opcional: `x`, `y`, `largura`, `altura` em pixels **após orientação EXIF**, compatível com `croppedAreaPixels` do react-easy-crop. O frontend de recorte será feito em etapa posterior.
 - Limites: 10 MB, 20 megapixels, apenas imagens estáticas. No máximo duas conversões simultâneas.
 - WebP qualidade 85; capas até 900×1200 preservando proporção, avatares quadrados até 512×512 e coleções até 900×900. Miniaturas de capa até 240×320; outras até 160×160. Sem ampliação desnecessária; metadados removidos.
-- Arquivos são escritos atomicamente e deduplicados por conteúdo, perfil e tipo. Remover a referência não apaga imediatamente o arquivo, evitando perda de imagens compartilhadas. Limpeza de arquivos órfãos fica para uma etapa posterior.
+- Arquivos são escritos atomicamente e deduplicados por conteúdo, perfil e tipo. Remover a referência não apaga imediatamente o arquivo, evitando perda de imagens compartilhadas. A limpeza de imagens sem uso fica em *Backup e recuperação*, sempre com backup de segurança antes.
 - Downloads aceitam HTTPS público direto; não aceitam páginas de resultados de busca, rede privada, credenciais na URL ou portas alternativas. DNS é validado, IP é fixado na conexão, hostname é mantido no TLS e cada redirecionamento é revalidado. Tamanho, tempo de leitura e redirecionamentos são limitados.
 - A API prepara paginação e miniaturas; a virtualização e o ciclo de vida de URLs de Blob serão implementados nos cards. Nenhuma redução de 80% em disco ou meta de RAM foi presumida: isso depende das imagens e será medido.
 
@@ -126,7 +153,7 @@ pnpm build
 
 Os testes usam diretórios temporários, imagens sintéticas e registros de migração sintéticos. Cobrem isolamento, persistência após reinício, credenciais, invalidação de sessões, regras de jogos/troféus, exclusão de coleções, busca/paginação, limites de upload, EXIF/recorte, bloqueio de URL privada e redirecionamento, preservação de backup e rejeição de migração parcial.
 
-Resultado nesta entrega: **22 testes aprovados**, `pip check` sem dependências quebradas, scripts PowerShell com sintaxe válida e build TypeScript/Vite aprovado. O TestClient emitiu um aviso de depreciação sobre o transporte httpx, sem falhas nos testes. A interface confirmou “Serviço local conectado”, formulário de perfil com rolagem interna e ausência de overflow horizontal em viewport de 390 px. Não foram criados perfis fictícios na biblioteca do usuário. Um download HTTPS real do logo público do Python também foi convertido com sucesso em WebP; esse único arquivo não representa uma estimativa de economia para capas de jogos.
+Resultado em 24/10/2026: **65 testes aprovados** no back-end (inclui `test_metadata.py` e `test_platforms.py`) e 27 no front-end; o parágrafo abaixo descreve a primeira entrega da etapa 2 (então 22 testes). `pip check` sem dependências quebradas, scripts PowerShell com sintaxe válida e build TypeScript/Vite aprovado. O TestClient emitiu um aviso de depreciação sobre o transporte httpx, sem falhas nos testes. A interface confirmou “Serviço local conectado”, formulário de perfil com rolagem interna e ausência de overflow horizontal em viewport de 390 px. Não foram criados perfis fictícios na biblioteca do usuário. Um download HTTPS real do logo público do Python também foi convertido com sucesso em WebP; esse único arquivo não representa uma estimativa de economia para capas de jogos.
 
 ## Limitações da entrega
 
