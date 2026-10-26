@@ -27,7 +27,11 @@ Fontes: <https://partner.steamgames.com/doc/webapi/IPlayerService>, <https://par
 - **Não viável de forma confiável**: "detectar que o jogo foi iniciado" em tempo real. `GetPlayerSummaries` só mostra o jogo aberto enquanto a pessoa está online e com perfil público; a alternativa de ler processos do Windows foi descartada, como o prompt pediu, por depender de varredura local sem razão técnica comprovada.
 - **Não implementado nesta entrega**, porque exige cadastro da chave, o SteamID e a decisão explícita de ligar a conta. O provedor já tem o lugar certo para entrar: `covers.py` (SOURCES/DETAILS), `igdb.py` como modelo de chave local (`igdb.json`), e os campos `fonte_externa`/`id_externo` para deduplicar.
 
-## Como seria ligar (quando você decidir)
+## Implementado em 25/10/2026 (à noite)
+
+O caminho "viável" acima virou código em `backend/nexus_backend/trophies.py` e no painel *Troféus e conquistas* de *Conta e preferências*: vínculo com chave + SteamID64 (só neste computador, arquivo `steam.json`), lista de jogos recentes ou possuídos com tempo de jogo, importação com ficha/capa/conquistas e sincronização de obtidos/total por appid. O **RetroAchievements** entrou pelo mesmo painel (chave de API web + usuário, `retroachievements.json`), por ter API oficial documentada. A pesquisa do mesmo dia confirmou que PlayStation, Xbox, Nintendo e Epic não têm API oficial de troféus para o usuário final (só bibliotecas não oficiais que usam a sessão da conta, com risco de banimento), por isso ficaram de fora. Detalhes e testes em [ATUALIZACAO-0.3.md](../ATUALIZACAO-0.3.md).
+
+## Como seria ligar (texto original do estudo)
 
 1. Criar `steam.json` na pasta de dados com `{"api_key": "...", "steam_id": "..."}` (o app pode oferecer esta tela depois).
 2. Em *Conta e preferências*, "Vincular Steam": lista os jogos recentes com prévia e caixas de seleção; só os marcados entram, sem duplicar appids já existentes e sem tocar progresso, notas, datas ou capas escolhidas.

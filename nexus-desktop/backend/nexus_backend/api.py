@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 import http.client
 import json
 import logging
@@ -19,8 +20,9 @@ from starlette.concurrency import run_in_threadpool
 from .covers import DETAILS_CACHE_SECONDS, SEARCH_CACHE_SECONDS, SOURCES, Cache, Throttle, download_cover, fetch_preview, game_details, search_covers
 from .database import Database, data_directory, normalize
 from .images import MAX_BYTES, download_image, store_image
-from . import avatars, igdb, maintenance
-from .models import AvatarSlot, CandidateRef, CollectionInput, Crop, DeviceToken, GameInput, ImageRef, Login, NetworkInput, OrderInput, PasswordChange, PasswordReset, PreferencesInput, ProfileCreate, RemoteImage
+from . import avatars, igdb, maintenance, trophies
+from .models import (AvatarSlot, CandidateRef, CollectionInput, Crop, DeviceToken, GameInput, ImageRef, Login, NetworkInput, OrderInput, PasswordChange, PasswordReset,
+                     PreferencesInput, ProfileCreate, RemoteImage, TrophyImportInput, TrophySource, TrophySourceInput, TrophySyncInput)
 from .network import LOOPBACK, NetworkAccess
 from .security import Sessions, check_password, device_login, encode_password, forget_device, forget_devices, list_devices, remember_device
 from .service import SUMMARY_COLUMNS, find_duplicate, game_result, owned, reorder_games, save_collection, save_game, validate_image
@@ -96,6 +98,7 @@ def create_app(directory: Path | None = None):
     search_cache, details_cache = Cache(SEARCH_CACHE_SECONDS), Cache(DETAILS_CACHE_SECONDS)
     device_throttle = Throttle(limit=30, window=60)
     reset_throttle = Throttle(limit=3, window=300)
+    trophy_throttle = Throttle(limit=20, window=300)  # listas, importações e sincronizações de troféus por perfil
     app.state.db = db
     app.state.sessions = sessions
     app.state.network = network
@@ -627,6 +630,141 @@ def create_app(directory: Path | None = None):
         except (ValueError, OSError, http.client.HTTPException) as exc:
             raise HTTPException(422, 'Não foi possível baixar a imagem. Use um link direto HTTPS público para JPEG, PNG ou WebP.') from exc
         return process_image(user_id, model.tipo, data, model.recorte)
+
+    # Troféus por fontes oficiais (Steam Web API e RetroAchievements), com chave pessoal guardada só neste computador.
+
+    def trophy_config_or_409(source: str) -> dict:
+        config = trophies.load_config(db.directory, source)
+        if not config:
+            raise HTTPException(409, f'{trophies.LABELS[source]} não está vinculada neste computador. Vincule em Conta e preferências.')
+        return config
+
+    def trophy_allow(user_id: int):
+        if not trophy_throttle.allow(user_id):
+            raise HTTPException(429, 'Muitas consultas de troféus seguidas. Aguarde alguns minutos.', headers={'Retry-After': '300'})
+
+    @app.get('/api/trofeus/fontes')
+    def trophy_sources(request: Request, user_id: User):
+        return {'fontes': trophies.all_status(db.directory), 'local': from_this_computer(request)}
+
+    @app.put('/api/trofeus/fontes/{fonte}')
+    def trophy_link(fonte: TrophySource, model: TrophySourceInput, request: Request, user_id: User):
+        """Guarda a chave e a identificação em arquivo local depois de uma consulta de teste; a chave nunca volta ao navegador."""
+        if not from_this_computer(request):
+            raise HTTPException(403, 'Fontes de troféus só podem ser vinculadas neste computador, não pelo celular ou pela rede.')
+        trophy_allow(user_id)
+        try:
+            config = trophies.validate(fonte, model.api_key, model.identificacao)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        warning = ''
+        try:
+            trophies.list_games(fonte, config, 'recentes')
+        except trophies.SourceError as exc:
+            if exc.codigo == 'credenciais':
+                raise HTTPException(422, str(exc)) from exc
+            warning = str(exc)
+        trophies.save_config(db.directory, fonte, config)
+        return {**trophies.status(db.directory, fonte), 'aviso': warning}
+
+    @app.delete('/api/trofeus/fontes/{fonte}', status_code=204)
+    def trophy_unlink(fonte: TrophySource, request: Request, user_id: User):
+        if not from_this_computer(request):
+            raise HTTPException(403, 'Fontes de troféus só podem ser desvinculadas neste computador.')
+        trophies.remove_config(db.directory, fonte)
+
+    @app.get('/api/trofeus/{fonte}/jogos')
+    def trophy_games(fonte: TrophySource, user_id: User, modo: Literal['recentes', 'possuidos'] = 'recentes'):
+        """Jogos da conta vinculada, com a indicação dos que já estão na biblioteca deste perfil."""
+        config = trophy_config_or_409(fonte)
+        trophy_allow(user_id)
+        try:
+            items = trophies.list_games(fonte, config, modo)
+        except trophies.SourceError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        with db.connection() as conn:
+            linked = {row['id_externo']: {'id': row['id'], 'nome': row['nome']} for row in conn.execute('SELECT id,nome,id_externo FROM jogos WHERE usuario_id=? AND fonte_externa=?', (user_id, fonte))}
+        return {'modo': modo, 'itens': [{**item, 'na_biblioteca': linked.get(item['id'])} for item in items]}
+
+    @app.post('/api/trofeus/{fonte}/importar', status_code=201)
+    def trophy_import(fonte: TrophySource, model: TrophyImportInput, user_id: User):
+        """Cria jogos a partir da conta vinculada: ficha e capa da fonte, tempo de jogo e troféus da sua conta.
+
+        Só entram identificadores que a própria fonte listou para a conta; jogos já ligados ao mesmo id são ignorados, nunca
+        sobrescritos. Progresso, notas, datas e cronograma ficam vazios para você preencher.
+        """
+        config = trophy_config_or_409(fonte)
+        trophy_allow(user_id)
+        if model.colecao_id:
+            with db.connection() as conn:
+                owned(conn, 'colecoes', model.colecao_id, user_id)
+        try:
+            available = {item['id']: item for item in trophies.list_games(fonte, config, model.modo)}
+        except trophies.SourceError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        imported, skipped = [], []
+        for external_id in model.ids:
+            item = available.get(external_id)
+            if not item:
+                skipped.append({'id': external_id, 'nome': '', 'motivo': 'Este jogo não está na lista da sua conta nesta fonte.'})
+                continue
+            with db.connection() as conn:
+                duplicate = find_duplicate(conn, user_id, fonte, external_id)
+            if duplicate:
+                skipped.append({'id': external_id, 'nome': item['titulo'], 'motivo': f'Já está na biblioteca como "{duplicate["nome"]}".'})
+                continue
+            details = None
+            try:
+                details = external_details('steam', external_id) if fonte == 'steam' else trophies.retro_details(config, external_id)
+            except (HTTPException, ValueError, OSError, http.client.HTTPException) as exc:
+                if isinstance(exc, HTTPException) and exc.status_code >= 500:
+                    raise
+            image = None
+            cover_source = details if details and details.get('imagem') else {'fonte': fonte, 'imagem': item['imagem']}
+            try:
+                image = process_image(user_id, 'capa', download_cover(cover_source), None)
+            except (ValueError, OSError, http.client.HTTPException, HTTPException) as exc:
+                if isinstance(exc, HTTPException) and exc.status_code >= 500:
+                    raise
+            earned = None
+            if fonte == 'steam':
+                try:
+                    earned = trophies.steam_achievements(config, external_id)
+                except trophies.SourceError:
+                    earned = None
+            elif item.get('trofeus_total'):
+                earned = {'obtidos': item['trofeus_obtidos'] or 0, 'total': item['trofeus_total'], 'escopo': 'jogo base'}
+            data = {'nome': (details or item)['titulo'], 'plataforma': item['plataforma'], 'capa_id': image['id'] if image else None,
+                    'fonte_externa': fonte, 'id_externo': external_id, 'url_origem': (details or item)['origem'],
+                    'minutos_jogados': item.get('minutos') or 0, 'colecao_id': model.colecao_id}
+            if details:
+                data.update(genero=details['genero'], data_lancamento=details['data_lancamento'], desenvolvedor=', '.join(details['desenvolvedores'])[:200],
+                            publicadora=', '.join(details['publicadoras'])[:200], descricao=details['descricao'])
+            if earned:
+                data.update(trofeus_obtidos=earned['obtidos'], trofeus_total=earned['total'], trofeus_fonte=fonte, trofeus_escopo=earned['escopo'], trofeus_consultado_em=stamp)
+            try:
+                game = GameInput.model_validate(data)
+            except ValidationError as exc:
+                skipped.append({'id': external_id, 'nome': item['titulo'], 'motivo': 'A ficha da fonte não passou na validação do Nexus.'})
+                logging.getLogger('nexus.trofeus').warning('Importação de %s %s recusada: %s', fonte, external_id, exc.errors()[0]['msg'] if exc.errors() else exc)
+                continue
+            with db.connection() as conn:
+                saved = save_game(conn, game, user_id)
+            imported.append({'id': saved['id'], 'nome': saved['nome'], 'capa': image is not None, 'trofeus': earned is not None})
+        return {'importados': imported, 'ignorados': skipped}
+
+    @app.post('/api/trofeus/sincronizar')
+    def trophy_sync(model: TrophySyncInput, user_id: User):
+        """Atualiza obtidos/total dos jogos ligados a fontes vinculadas; falhas são relatadas por jogo e nunca zeram valores."""
+        trophy_allow(user_id)
+        configs = {source: trophies.load_config(db.directory, source) for source in trophies.SOURCES}
+        if not any(configs.values()):
+            raise HTTPException(409, 'Nenhuma fonte de troféus vinculada. Vincule a Steam ou o RetroAchievements em Conta e preferências.')
+        with db.connection() as conn:
+            if model.jogo_id:
+                owned(conn, 'jogos', model.jogo_id, user_id)
+            return trophies.sync(conn, user_id, {source: config for source, config in configs.items() if config}, model.jogo_id)
 
     @app.get('/api/imagens/{image_id}')
     def image(image_id: str, user_id: User, miniatura: bool = False):

@@ -97,3 +97,24 @@ test('several possible platforms preserve the current choice or become a quick c
   assert.match(covers.fillSummary(['nome', 'genero'], true, 'Steam'), /capa, nome do jogo, gênero/);
   assert.match(covers.fillSummary([], false, 'Wikipedia'), /Nenhum campo vazio/);
 });
+
+const ficha = (over = {}) => ({ requisitos_minimos: '', requisitos_recomendados: '', idiomas: [], classificacao: '', classificacao_detalhe: '', tempo_historia: null, tempo_extras: null, tempo_completo: null, metacritic: null, categorias: [], ...over });
+
+test('the full sheet fills only empty items, merges item by item and turns differences into one confirmable conflict', () => {
+  const incoming = ficha({ requisitos_minimos: 'SO: Windows 10', idiomas: ['Português - Brasil (áudio)', 'Inglês'], classificacao: 'ClassInd 18 anos', metacritic: 86 });
+  const fresh = covers.mergeDetails(game({ ficha: ficha() }), details({ ficha: incoming }), { isNew: true, touched: new Set() });
+  assert.deepEqual(fresh.form.ficha, incoming);
+  assert.ok(fresh.filled.includes('ficha') && fresh.conflicts.length === 0);
+  const mine = ficha({ classificacao: 'Livre', tempo_historia: 600 });
+  const merged = covers.mergeDetails(game({ ficha: mine }), details({ ficha: incoming }), { isNew: false, touched: new Set() });
+  assert.equal(merged.form.ficha.classificacao, 'Livre', 'what I typed stays');
+  assert.equal(merged.form.ficha.tempo_historia, 600, 'items the source does not have are kept');
+  assert.deepEqual(merged.form.ficha.idiomas, incoming.idiomas, 'empty items are filled');
+  const conflict = merged.conflicts.find(change => change.field === 'ficha');
+  assert.ok(conflict && conflict.current.includes('classificação indicativa'));
+  const replaced = covers.applyChanges(merged.form, [conflict], details({ ficha: incoming }));
+  assert.equal(replaced.ficha.classificacao, 'ClassInd 18 anos');
+  assert.equal(replaced.ficha.tempo_historia, 600, 'confirming the source never erases items it does not have');
+  const none = covers.mergeDetails(game({ ficha: mine }), details({ ficha: ficha() }), { isNew: false, touched: new Set() });
+  assert.ok(!none.filled.includes('ficha') && !none.conflicts.some(change => change.field === 'ficha') && none.form.ficha.classificacao === 'Livre');
+});

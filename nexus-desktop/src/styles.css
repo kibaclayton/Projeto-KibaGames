@@ -467,3 +467,36 @@ input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer;
 .commons-results { list-style: none; padding: 0; margin: 14px 0 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
 .commons-results img, .commons-results .cover-candidate-loading { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: #171723; }
 @media (max-width: 760px) { .spotlight-body { grid-template-columns: 1fr; padding: 18px; } .spotlight-cover { max-width: 220px; } .preview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .sort-field { flex-basis: 100%; } .journey-facts { grid-template-columns: 1fr; } }
+
+/* Troféus por fontes oficiais (Conta e preferências) */
+.trophy-panel { border-bottom: 1px solid var(--border); padding: 24px 0; }
+.trophy-panel .section-heading { margin-top: 0; flex-wrap: wrap; }
+.trophy-panel h3 { display: flex; align-items: center; gap: 8px; }
+.trophy-panel h4 { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; margin: 0 0 8px; }
+.trophy-panel p.muted { font-size: 12px; line-height: 1.5; }
+.trophy-panel a { color: var(--focus); }
+.trophy-panel code { font-family: ui-monospace, Consolas, monospace; font-size: 11px; overflow-wrap: anywhere; }
+.trophy-source { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-top: 14px; background: var(--surface-raised); }
+.trophy-form { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); align-items: end; }
+.trophy-form .field-label { margin-top: 4px; }
+.trophy-form .trophy-help { grid-column: 1 / -1; }
+.trophy-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.trophy-mode { width: auto; padding: 8px 10px; }
+.trophy-list { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 8px; max-height: 380px; overflow: auto; }
+.trophy-list label { display: grid; grid-template-columns: auto 44px 1fr; gap: 10px; align-items: center; padding: 6px 8px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+.trophy-list label.is-linked { opacity: .65; cursor: default; }
+.trophy-list img, .trophy-thumb { display: block; width: 44px; height: 59px; object-fit: cover; border-radius: 6px; background: #171723; }
+.trophy-list strong { font-size: 12px; }
+.trophy-list small { display: block; color: var(--muted); font-size: 11px; line-height: 1.4; }
+.trophy-result { font-size: 12px; margin-top: 10px; line-height: 1.5; }
+.trophy-result ul { margin: 6px 0 0 18px; padding: 0; }
+
+/* Ficha completa no editor */
+.ficha-details { margin-top: 18px; border: 1px solid var(--border); border-radius: 12px; padding: 2px 14px 14px; background: var(--surface-raised); }
+.ficha-details summary { cursor: pointer; padding: 10px 0; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.ficha-details summary .muted { font-weight: 400; font-size: 11px; }
+.ficha-details .field-label { margin-top: 14px; }
+.ficha-times { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.ficha-times .input { min-width: 0; }
+.ficha-time-label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+.requirements-input { min-height: 110px; font: inherit; font-size: 12px; line-height: 1.5; resize: vertical; white-space: pre-wrap; }

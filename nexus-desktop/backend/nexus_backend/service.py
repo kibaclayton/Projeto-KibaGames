@@ -2,7 +2,7 @@ import json
 import sqlite3
 from fastapi import HTTPException
 from .database import normalize
-from .models import GameInput
+from .models import Ficha, GameInput
 
 SUMMARY_COLUMNS = 'id,nome,plataforma,progresso,capa_id,data_inicio,data_termino,ordem,favorito,colecao_id,trofeus_obtidos,trofeus_total,status_avancado,genero,minutos_jogados,data_lancamento,desenvolvedor,publicadora,fonte_externa,id_externo,ainda_jogando,posicao,trofeus_fonte,atualizado'
 
@@ -35,6 +35,8 @@ def game_result(row):
     data['platinado'] = total > 0 and earned == total
     if 'cronograma' in data:
         data['cronograma'] = json.loads(data['cronograma'])
+    if 'ficha' in data:
+        data['ficha'] = Ficha.model_validate(json.loads(data['ficha'] or '{}')).model_dump()
     return data
 
 
@@ -42,6 +44,7 @@ def game_values(model: GameInput):
     data = model.model_dump(mode='json')
     data['nome_chave'] = normalize(data['nome'])
     data['cronograma'] = json.dumps(data['cronograma'], sort_keys=True, ensure_ascii=False)
+    data['ficha'] = json.dumps(data['ficha'], sort_keys=True, ensure_ascii=False)
     return data
 
 

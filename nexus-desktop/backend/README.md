@@ -68,7 +68,7 @@ O snapshot não é um dump de todo o servidor MySQL; é a cópia completa das tr
 - Hash PBKDF2-HMAC-SHA256 com 600.000 iterações e salt individual de 16 bytes, compatível com o legado; comparação em tempo constante.
 - Senhas novas de 8 a 256 caracteres; troca exige senha atual e confirmação.
 - Tokens aleatórios com 256 bits; somente o hash é mantido em memória por até 12 horas. Logout revoga a sessão; troca de senha revoga todas as sessões do perfil. Reiniciar o backend exige novo login, exceto em aparelhos lembrados.
-- "Lembrar neste aparelho": credencial de 256 bits por aparelho, guardada só como hash SHA-256 na tabela `aparelhos`, rotacionada a cada uso, válida por 90 dias sem uso; sair esquece o aparelho, trocar a senha esquece todos. Por 60 s após a rotação, a credencial anterior ainda abre sessão sem receber credencial nova. O esquema do banco está na versão 4 (migrações incrementais em `database.MIGRATIONS`; a v4 acrescenta a ficha do jogo: lançamento, estúdios, descrição e identificador externo).
+- "Lembrar neste aparelho": credencial de 256 bits por aparelho, guardada só como hash SHA-256 na tabela `aparelhos`, rotacionada a cada uso, válida por 90 dias sem uso; sair esquece o aparelho, trocar a senha esquece todos. Por 60 s após a rotação, a credencial anterior ainda abre sessão sem receber credencial nova. O esquema do banco está na versão 6 (migrações incrementais em `database.MIGRATIONS`; a v4 acrescenta a ficha do jogo: lançamento, estúdios, descrição e identificador externo; a v5, ordem manual, "ainda jogando", origem dos troféus, preferências e galeria de avatares; a v6, a ficha completa em JSON validado: requisitos, idiomas, classificação indicativa, tempo de jogo, Metacritic e categorias).
 - A interface mantém o token apenas em memória. Ela salva o perfil no SQLite, não a senha nem o token no navegador.
 - Até cinco tentativas de autenticação por perfil por minuto.
 - Operações de jogos, imagens e coleções sempre verificam o dono. O banco também impede jogos vinculados a uma coleção de outro usuário.
@@ -94,6 +94,11 @@ Contrato interativo: `http://127.0.0.1:8765/docs`; JSON: `/openapi.json`. A docu
 | GET `/api/avatares/busca` | Imagens do Wikimedia Commons (`termo`), com licença e autor; prévia pelo proxy `/api/capas/previa` |
 | PUT `/api/jogos/ordem` | Ordem manual da biblioteca (`ids`); `GET /api/jogos?ordenacao=minha|nome|recentes|progresso|colecao` |
 | GET `/api/capas/fontes` | Se a IGDB está configurada (`igdb.json` na pasta de dados) e onde fica o arquivo |
+| GET `/api/trofeus/fontes` | Estado das fontes oficiais de troféus (Steam Web API, RetroAchievements): vinculada, identificação e arquivo; a chave nunca é devolvida |
+| PUT/DELETE `/api/trofeus/fontes/{fonte}` | Vincular (chave + SteamID64/usuário, com consulta de teste) ou desvincular; só de 127.0.0.1 |
+| GET `/api/trofeus/{fonte}/jogos` | Jogos da conta vinculada (`modo` = recentes ou possuidos) com prévia, tempo, conquistas e o jogo já ligado na biblioteca |
+| POST `/api/trofeus/{fonte}/importar` | Cria jogos a partir de `ids` listados pela fonte (ficha, capa, tempo e conquistas; sem tocar dados pessoais); duplicatas ignoradas |
+| POST `/api/trofeus/sincronizar` | Atualiza obtidos/total dos jogos ligados às fontes vinculadas (`jogo_id` opcional); falhas relatadas por jogo, valores nunca zerados |
 | PUT `/api/conta/senha` | Senha atual, nova senha e confirmação |
 | PUT `/api/conta/avatar` | Vincular imagem de avatar ou remover vínculo com `null` |
 | GET `/api/resumo` | Contagens do perfil |

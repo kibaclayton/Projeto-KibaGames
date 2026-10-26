@@ -1,4 +1,5 @@
 from datetime import date
+import re
 from urllib.parse import urlsplit
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -71,6 +72,38 @@ class CollectionInput(Model):
         return value.strip()
 
 
+class Ficha(Model):
+    """Ficha completa da obra, vinda das fontes ou digitada: requisitos, idiomas, classificação indicativa, tempo de jogo e categorias.
+
+    Tempos em minutos (história principal, com extras e 100%); só a IGDB os publica hoje. Nunca contém dados da jornada pessoal.
+    """
+    requisitos_minimos: str = Field(default='', max_length=3000)
+    requisitos_recomendados: str = Field(default='', max_length=3000)
+    idiomas: list[str] = Field(default_factory=list, max_length=60)
+    classificacao: str = Field(default='', max_length=80)
+    classificacao_detalhe: str = Field(default='', max_length=300)
+    tempo_historia: int | None = Field(default=None, ge=0, le=100000)
+    tempo_extras: int | None = Field(default=None, ge=0, le=100000)
+    tempo_completo: int | None = Field(default=None, ge=0, le=100000)
+    metacritic: int | None = Field(default=None, ge=0, le=100)
+    categorias: list[str] = Field(default_factory=list, max_length=30)
+
+    @field_validator('idiomas', 'categorias')
+    @classmethod
+    def short_items(cls, value):
+        result = []
+        for item in value:
+            text = ' '.join(str(item).split())[:60]
+            if text and text not in result:
+                result.append(text)
+        return result
+
+    @field_validator('requisitos_minimos', 'requisitos_recomendados', 'classificacao', 'classificacao_detalhe')
+    @classmethod
+    def clean_text(cls, value):
+        return '\n'.join(' '.join(line.split()) for line in value.strip().splitlines() if line.strip())
+
+
 class GameInput(Model):
     nome: str = Field(min_length=1, max_length=150)
     plataforma: str = Field(default='PC', min_length=1, max_length=30)
@@ -94,7 +127,7 @@ class GameInput(Model):
     desenvolvedor: str = Field(default='', max_length=200)
     publicadora: str = Field(default='', max_length=200)
     descricao: str = Field(default='', max_length=4000)
-    fonte_externa: Literal['', 'steam', 'wikipedia', 'igdb'] = ''
+    fonte_externa: Literal['', 'steam', 'wikipedia', 'igdb', 'retroachievements'] = ''
     id_externo: str = Field(default='', max_length=64, pattern=r'^[A-Za-z0-9:_-]*$')
     url_origem: str = Field(default='', max_length=2048)
     # Jornada em andamento: sem data de término enquanto marcado. Progresso não muda por causa disto.
@@ -103,6 +136,7 @@ class GameInput(Model):
     trofeus_fonte: str = Field(default='', max_length=40)
     trofeus_escopo: str = Field(default='', max_length=40)
     trofeus_consultado_em: str | None = Field(default=None, max_length=40)
+    ficha: Ficha = Field(default_factory=Ficha)
 
     @field_validator('nome', 'plataforma')
     @classmethod
@@ -182,8 +216,35 @@ class NetworkInput(Model):
 
 class CandidateRef(Model):
     """Resultado escolhido na busca: identidade do provedor, nunca uma URL livre vinda da interface."""
-    fonte: Literal['steam', 'wikipedia']
+    fonte: Literal['steam', 'wikipedia', 'igdb']
     id: str = Field(min_length=1, max_length=64, pattern=r'^[A-Za-z0-9:_-]+$')
+    jogo_id: int | None = Field(default=None, gt=0)
+
+
+TrophySource = Literal['steam', 'retroachievements']
+
+
+class TrophySourceInput(Model):
+    """Vínculo de uma fonte oficial de troféus: chave pessoal + identificação (SteamID64 ou usuário). Só deste computador."""
+    api_key: str = Field(min_length=8, max_length=80)
+    identificacao: str = Field(min_length=2, max_length=40)
+
+
+class TrophyImportInput(Model):
+    """Jogos da conta vinculada escolhidos para entrar na biblioteca; só identificadores que a própria fonte listou."""
+    ids: list[str] = Field(min_length=1, max_length=50)
+    modo: Literal['recentes', 'possuidos'] = 'recentes'
+    colecao_id: int | None = Field(default=None, gt=0)
+
+    @field_validator('ids')
+    @classmethod
+    def numeric_ids(cls, value):
+        if len(set(value)) != len(value) or any(not re.fullmatch(r'[0-9]{1,12}', item) for item in value):
+            raise ValueError('Identificadores inválidos ou repetidos.')
+        return value
+
+
+class TrophySyncInput(Model):
     jogo_id: int | None = Field(default=None, gt=0)
 
 

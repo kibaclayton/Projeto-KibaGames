@@ -4,7 +4,7 @@ import os
 import sqlite3
 import unicodedata
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 def normalize(value: str) -> str:
@@ -111,6 +111,12 @@ UPDATE jogos SET posicao = id WHERE posicao IS NULL;
 INSERT INTO avatares(usuario_id, posicao, imagem_id) SELECT id, 1, avatar_id FROM usuarios WHERE avatar_id IS NOT NULL;
 CREATE INDEX idx_jogos_posicao ON jogos(usuario_id,posicao);
 PRAGMA user_version = 5;
+""",
+    # Ficha completa vinda das fontes (requisitos, idiomas, classificação indicativa, tempo de jogo, categorias), em JSON
+    # fechado validado pelo modelo Ficha; editável e nunca sobrescreve o que a pessoa digitou.
+    6: """
+ALTER TABLE jogos ADD COLUMN ficha TEXT NOT NULL DEFAULT '{}';
+PRAGMA user_version = 6;
 """,
 }
 

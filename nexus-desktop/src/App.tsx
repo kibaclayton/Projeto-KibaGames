@@ -9,6 +9,7 @@ import { AvatarImage } from './components/AvatarImage';
 import { BackendPanel } from './components/BackendPanel';
 import { MaintenancePanel } from './components/MaintenancePanel';
 import { NetworkPanel } from './components/NetworkPanel';
+import { TrophyPanel } from './components/TrophyPanel';
 import { UpdatePanel } from './components/UpdatePanel';
 import { useBackend } from './services/BackendProvider';
 import type { Preferences } from './services/api';
@@ -50,6 +51,8 @@ export function App() {
   const [page, setPage] = useState<Page>('library');
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Importações e sincronizações feitas em Conta e preferências recarregam a biblioteca ao mudar esta chave.
+  const [libraryEpoch, setLibraryEpoch] = useState(0);
   const { theme } = useTheme();
   const visual = useVisualPreferences();
   const { session } = useBackend();
@@ -73,11 +76,11 @@ export function App() {
       <header className="topbar"><span className="breadcrumb">Nexus Wolf’s <ChevronRight size={13} /> <span>{title}</span></span><div className="header-actions"><span className="version">NEXUS WOLF’S · 0.3</span><Button variant="ghost" aria-label={theme === 'dark' ? 'Ativar tema claro' : 'Ativar tema escuro'} onClick={toggleTheme}>{theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}</Button><Button variant="ghost" aria-label="Abrir preferências" onClick={() => setSettingsOpen(true)}><Settings2 size={19} /></Button></div></header>
       <main id="content" tabIndex={-1}>
         <div className="page-heading"><div><p className="eyebrow">A PRÓXIMA FASE COMEÇA AQUI</p><h1>{page === 'library' ? 'Seus mundos. Um só lugar.' : title}</h1></div><span className="stage-badge"><span className="status-dot" /> Biblioteca local</span></div>
-        {page === 'design' ? <Personalize preferences={visual.preferences} onChange={visual.update} perProfile={visual.perProfile} saveError={visual.saveError} /> : <LibraryView key={`${session?.perfil.id ?? 0}:${page}`} section={page} onLogin={() => setSettingsOpen(true)} />}
+        {page === 'design' ? <Personalize preferences={visual.preferences} onChange={visual.update} perProfile={visual.perProfile} saveError={visual.saveError} /> : <LibraryView key={`${session?.perfil.id ?? 0}:${page}:${libraryEpoch}`} section={page} onLogin={() => setSettingsOpen(true)} />}
         <footer className="page-footer"><span>NEXUS WOLF’S</span><span>Feito para a sua próxima aventura.</span></footer>
       </main>
     </div>
-    <Modal open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Conta e preferências">{settingsOpen && <BackendPanel />}{settingsOpen && <AccountPanel />}{settingsOpen && <NetworkPanel />}{settingsOpen && <MaintenancePanel />}{settingsOpen && <UpdatePanel />}<div className="preference-row"><div><h3>Aparência</h3><p className="muted">Tema {theme === 'dark' ? 'escuro' : 'claro'}. Mais opções em Personalizar visual.</p></div><Button onClick={toggleTheme}>{theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />} Alternar tema</Button></div></Modal>
+    <Modal open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Conta e preferências">{settingsOpen && <BackendPanel />}{settingsOpen && <AccountPanel />}{settingsOpen && <TrophyPanel onLibraryChanged={() => setLibraryEpoch(n => n + 1)} />}{settingsOpen && <NetworkPanel />}{settingsOpen && <MaintenancePanel />}{settingsOpen && <UpdatePanel />}<div className="preference-row"><div><h3>Aparência</h3><p className="muted">Tema {theme === 'dark' ? 'escuro' : 'claro'}. Mais opções em Personalizar visual.</p></div><Button onClick={toggleTheme}>{theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />} Alternar tema</Button></div></Modal>
   </div>;
 }
 

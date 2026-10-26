@@ -121,6 +121,20 @@ def search(config: dict, name: str, family: str = 'todas', fetch=fetch) -> list[
     return items
 
 
+def _minutes(seconds) -> int | None:
+    return int(seconds) // 60 if isinstance(seconds, (int, float)) and not isinstance(seconds, bool) and 0 < seconds <= 6000000 else None
+
+
+def time_to_beat(config: dict, external_id: str, fetch=fetch) -> dict:
+    """Tempo de jogo informado pela comunidade da IGDB (game_time_to_beats): história, com extras e 100%, em minutos."""
+    try:
+        rows = _query(config, 'game_time_to_beats', f'fields hastily,normally,completely; where game_id = {int(external_id)}; limit 1;', fetch)
+    except (ValueError, OSError):
+        return {}
+    row = rows[0] if rows and isinstance(rows[0], dict) else {}
+    return {'tempo_historia': _minutes(row.get('hastily')), 'tempo_extras': _minutes(row.get('normally')), 'tempo_completo': _minutes(row.get('completely'))}
+
+
 def details(config: dict, external_id: str, fetch=fetch) -> dict:
     """Ficha completa do mesmo id: gêneros, plataformas, lançamento, estúdios e resumo. Sem total de troféus (a IGDB não os tem)."""
     if not re.fullmatch(r'[0-9]{1,12}', external_id):
@@ -144,6 +158,7 @@ def details(config: dict, external_id: str, fetch=fetch) -> dict:
     title = game['name'] + (f' ({game["version_title"]})' if isinstance(game.get('version_title'), str) and game['version_title'] else '')
     return {
         'titulo': title[:150], 'imagem': cover_url(cover) if isinstance(cover, str) and re.fullmatch(r'[a-z0-9]+', cover) else None,
+        'ficha': time_to_beat(config, external_id, fetch),
         'origem': game.get('url') if isinstance(game.get('url'), str) and game['url'].startswith('https://www.igdb.com/') else f'https://www.igdb.com/games/{external_id}',
         'data_lancamento': _date(game.get('first_release_date')), 'ano': _year(game.get('first_release_date')),
         'plataformas': [p['name'] for p in game.get('platforms', []) if isinstance(p, dict) and isinstance(p.get('name'), str)][:8],

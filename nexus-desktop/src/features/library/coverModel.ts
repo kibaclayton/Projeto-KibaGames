@@ -1,4 +1,5 @@
-import type { CoverCandidate, ExternalDetails, GameInput } from '../../services/api';
+import type { CoverCandidate, ExternalDetails, Ficha, GameInput } from '../../services/api';
+import { FICHA_KEYS, emptyFicha, fichaHas } from './model.ts';
 
 /** Só links https simples viram `href`; qualquer outro valor vindo de fora é descartado. */
 export function safeHttpsUrl(value: string | null | undefined): string {
@@ -36,8 +37,34 @@ export function rankCandidates(query: string, items: CoverCandidate[]): CoverCan
   return items.map((item, index) => ({ item, index, score: score(item) })).sort((a, b) => b.score - a.score || a.index - b.index).map(entry => entry.item);
 }
 
-export type FillField = 'nome' | 'plataforma' | 'genero' | 'data_lancamento' | 'desenvolvedor' | 'publicadora' | 'descricao' | 'trofeus_total';
-export const FILL_LABELS: Record<FillField, string> = { nome: 'Nome do jogo', plataforma: 'Plataforma', genero: 'Gênero', data_lancamento: 'Lançamento', desenvolvedor: 'Desenvolvedor', publicadora: 'Publicadora', descricao: 'Descrição', trofeus_total: 'Total de troféus' };
+export type FillField = 'nome' | 'plataforma' | 'genero' | 'data_lancamento' | 'desenvolvedor' | 'publicadora' | 'descricao' | 'trofeus_total' | 'ficha';
+export const FILL_LABELS: Record<FillField, string> = { nome: 'Nome do jogo', plataforma: 'Plataforma', genero: 'Gênero', data_lancamento: 'Lançamento', desenvolvedor: 'Desenvolvedor', publicadora: 'Publicadora', descricao: 'Descrição', trofeus_total: 'Total de troféus', ficha: 'Ficha completa' };
+const FICHA_LABELS: Record<keyof Ficha, string> = { requisitos_minimos: 'requisitos mínimos', requisitos_recomendados: 'requisitos recomendados', idiomas: 'idiomas', classificacao: 'classificação indicativa', classificacao_detalhe: 'descritores da classificação', tempo_historia: 'tempo da história', tempo_extras: 'tempo com extras', tempo_completo: 'tempo para 100%', metacritic: 'Metacritic', categorias: 'categorias' };
+
+/**
+ * Ficha completa: cada campo vazio recebe o valor da fonte; campos já preenchidos com outro valor viram um único conflito
+ * "Ficha completa" (confirmado, a fonte substitui só esses). Devolve a ficha preenchida e o que mudou, em palavras.
+ */
+export function mergeFicha(current: Ficha | undefined, incoming: Ficha | undefined): { ficha: Ficha; filled: string[]; differing: string[] } {
+  const base = { ...emptyFicha(), ...(current ?? {}) };
+  const next = { ...base };
+  const filled: string[] = [], differing: string[] = [];
+  if (!incoming) return { ficha: base, filled, differing };
+  for (const key of FICHA_KEYS) {
+    const value = incoming[key];
+    if (!fichaHas(value)) continue;
+    if (!fichaHas(base[key])) { (next as Record<string, unknown>)[key] = Array.isArray(value) ? [...value] : value; filled.push(FICHA_LABELS[key]); }
+    else if (JSON.stringify(base[key]) !== JSON.stringify(value)) differing.push(FICHA_LABELS[key]);
+  }
+  return { ficha: next, filled, differing };
+}
+
+/** Ficha com os campos da fonte substituindo os atuais (só os que a fonte tem); usado ao confirmar o conflito "Ficha completa". */
+export function overrideFicha(current: Ficha | undefined, incoming: Ficha | undefined): Ficha {
+  const next = { ...emptyFicha(), ...(current ?? {}) };
+  for (const key of FICHA_KEYS) if (incoming && fichaHas(incoming[key])) (next as Record<string, unknown>)[key] = Array.isArray(incoming[key]) ? [...(incoming[key] as string[])] : incoming[key];
+  return next;
+}
 export interface FillChange { field: FillField; label: string; current: string; next: string }
 export interface FillResult { form: GameInput; filled: FillField[]; conflicts: FillChange[]; platformChoices: string[]; trophyNote: string }
 
@@ -86,6 +113,11 @@ export function mergeDetails(form: GameInput, details: ExternalDetails, options:
     else if (!form.trofeus_total) { Object.assign(next, { trofeus_total: total }, trophyMeta(details)); filled.push('trofeus_total'); }
     else if (form.trofeus_total !== total) conflicts.push({ field: 'trofeus_total', label: FILL_LABELS.trofeus_total, current: String(form.trofeus_total), next: String(total) });
   }
+  // Ficha completa (requisitos, idiomas, classificação, tempo de jogo…): campo a campo, só os vazios; diferenças viram um conflito só.
+  const ficha = mergeFicha(form.ficha, details.ficha);
+  next.ficha = ficha.ficha;
+  if (ficha.filled.length) filled.push('ficha');
+  if (ficha.differing.length) conflicts.push({ field: 'ficha', label: FILL_LABELS.ficha, current: ficha.differing.join(', '), next: `dados da fonte (${ficha.differing.join(', ')})` });
   return { form: next, filled, conflicts, platformChoices, trophyNote };
 }
 
@@ -93,6 +125,7 @@ export function mergeDetails(form: GameInput, details: ExternalDetails, options:
 export function applyChanges(form: GameInput, changes: FillChange[], details?: ExternalDetails): GameInput {
   return changes.reduce((current, change) => change.field === 'trofeus_total'
     ? { ...current, trofeus_total: Number(change.next), ...(details ? trophyMeta(details) : {}) }
+    : change.field === 'ficha' ? { ...current, ficha: overrideFicha(current.ficha, details?.ficha) }
     : { ...current, [change.field]: change.next }, form);
 }
 

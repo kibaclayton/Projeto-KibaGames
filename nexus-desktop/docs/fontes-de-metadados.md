@@ -27,3 +27,8 @@ Steam + Wikipedia/Wikidata, sem chave e sem cadastro, porque:
 Se quiser cobertura melhor de consoles e capas oficiais, a recomendação é **IGDB** (gratuita, não comercial, conta Twitch): metadados e capas pelo mesmo id, plataformas por lançamento e boa estabilidade. RAWG é a alternativa com cadastro mais simples, mas exige crédito e link em toda página que usa os dados.
 
 Fontes consultadas: páginas de governança e wrappers públicos da IGDB, termos da RAWG reproduzidos no pacote PyPI `rawg` e em `api.apis.guru`, blog do SteamDB e guias da comunidade sobre `appdetails`, documentação da API MediaWiki/Wikibase.
+
+## Complemento de 25/10/2026: ficha completa e troféus
+
+- **Ficha completa** (requisitos mínimos/recomendados, idiomas, classificação indicativa, Metacritic, categorias): vem de `appdetails` da Steam (`pc_requirements`, `supported_languages`, `ratings` com ClassInd/`dejus` antes de PEGI/ESRB/USK, `metacritic`, `categories`). A Wikipedia/Wikidata não traz esses campos. **Tempo de jogo** (história, com extras, 100%) só pela IGDB (`game_time_to_beats`), quando configurada; HowLongToBeat e PSNProfiles não têm API oficial e não são usadas.
+- **Troféus por conta**: Steam Web API (chave pessoal + SteamID64) e RetroAchievements (chave de API web + usuário), ambos oficiais e documentados, em `trophies.py`. PlayStation, Xbox, Nintendo e Epic: sem API oficial para o usuário; só caminhos não oficiais com risco de banimento, por isso ficam manuais. Estudo e decisão em [integracao-steam.md](integracao-steam.md).

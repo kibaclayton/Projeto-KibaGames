@@ -24,11 +24,16 @@ export interface Game {
   trofeus_obtidos: number; trofeus_total: number; trofeus_percentual: number; platinado: boolean;
   genero: string; minutos_jogados: number; atualizado: string;
   // Ficha vinda de uma fonte externa (opcional, editável); nunca inclui dados da jornada pessoal.
-  data_lancamento: string | null; desenvolvedor: string; publicadora: string; fonte_externa: '' | CoverSource; id_externo: string;
+  data_lancamento: string | null; desenvolvedor: string; publicadora: string; fonte_externa: '' | ExternalSource; id_externo: string;
   // Jornada em andamento (sem término), posição na ordem manual da biblioteca e origem do total de troféus.
   ainda_jogando: boolean; posicao: number | null; trofeus_fonte: string;
 }
-export interface GameDetails extends Game { grupo: string; notas: string; cronograma: Record<string, 'single' | 'range'>; descricao: string; url_origem: string; trofeus_escopo: string; trofeus_consultado_em: string | null }
+/** Ficha completa da obra (requisitos, idiomas, classificação indicativa, tempo de jogo em minutos, Metacritic, categorias); editável, nunca pessoal. */
+export interface Ficha {
+  requisitos_minimos: string; requisitos_recomendados: string; idiomas: string[]; classificacao: string; classificacao_detalhe: string;
+  tempo_historia: number | null; tempo_extras: number | null; tempo_completo: number | null; metacritic: number | null; categorias: string[];
+}
+export interface GameDetails extends Game { grupo: string; notas: string; cronograma: Record<string, 'single' | 'range'>; descricao: string; url_origem: string; trofeus_escopo: string; trofeus_consultado_em: string | null; ficha: Ficha }
 export type GameInput = Omit<GameDetails, 'id' | 'atualizado' | 'trofeus_percentual' | 'platinado' | 'posicao'>;
 export type GameSort = 'minha' | 'nome' | 'recentes' | 'progresso' | 'colecao';
 export type PlatformFamily = 'todas' | 'pc' | 'playstation' | 'xbox' | 'nintendo';
@@ -41,6 +46,22 @@ export interface BackupInfo { nome: string; bytes: number; modificado: string; v
 export interface IntegrityReport { ok: boolean; integridade: string[]; chaves_estrangeiras: unknown[]; contagens: Record<string, number>; esquema: number }
 export interface OrphanReport { registros: number; arquivos_sem_registro: number; bytes: number }
 export type CoverSource = 'steam' | 'wikipedia' | 'igdb';
+/** Fontes que podem identificar um jogo: as da busca de capas e as de troféus (RetroAchievements entra só pela importação). */
+export type ExternalSource = CoverSource | 'retroachievements';
+export const SOURCE_NAMES: Record<ExternalSource, string> = { steam: 'Steam', wikipedia: 'Wikipedia', igdb: 'IGDB', retroachievements: 'RetroAchievements' };
+export type TrophySource = 'steam' | 'retroachievements';
+export interface TrophySourceStatus { fonte: TrophySource; rotulo: string; configurada: boolean; identificacao: string; arquivo: string }
+export interface TrophySources { fontes: Record<TrophySource, TrophySourceStatus>; local: boolean }
+/** Jogo da conta vinculada, listado pela própria fonte; `na_biblioteca` aponta o jogo deste perfil já ligado ao mesmo id. */
+export interface TrophyGameItem {
+  fonte: TrophySource; id: string; titulo: string; imagem: string | null; previa: string | null; origem: string; plataforma: string;
+  minutos: number | null; ultimo_jogo: string | null; trofeus_obtidos: number | null; trofeus_total: number | null; na_biblioteca: { id: number; nome: string } | null;
+}
+export interface TrophyImportResult { importados: { id: number; nome: string; capa: boolean; trofeus: boolean }[]; ignorados: { id: string; nome: string; motivo: string }[] }
+export interface TrophySyncResult {
+  atualizados: { id: number; nome: string; antes: { obtidos: number; total: number }; obtidos: number; total: number; mudou: boolean }[];
+  ignorados: { id: number; nome: string; motivo: string }[]; consultado_em: string; total: number;
+}
 /** Resultado resumido da busca: `fonte + id` é a identidade estável usada para pedir a ficha completa ao serviço. */
 export interface CoverCandidate { fonte: CoverSource; id: string; titulo: string; imagem: string; previa: string; origem: string; ano: number | null; plataformas: string[] }
 export interface CoverSearch { itens: CoverCandidate[]; avisos: string[]; igdb_configurada?: boolean }
@@ -48,7 +69,7 @@ export interface CoverSearch { itens: CoverCandidate[]; avisos: string[]; igdb_c
 export interface ExternalDetails {
   fonte: CoverSource; id: string; titulo: string; imagem: string | null; origem: string; data_lancamento: string | null; ano: number | null;
   plataformas: string[]; plataformas_nexus: string[]; generos: string[]; genero: string; desenvolvedores: string[]; publicadoras: string[]; descricao: string; atribuicao: string;
-  trofeus_total: number | null; trofeus_fonte: string; trofeus_escopo: string; trofeus_consultado_em: string | null;
+  trofeus_total: number | null; trofeus_fonte: string; trofeus_escopo: string; trofeus_consultado_em: string | null; ficha: Ficha;
 }
 export interface DuplicateRef { id: number; nome: string; plataforma: string }
 export interface ApplyResult { detalhes: ExternalDetails; imagem: ImageResult | null; erro_capa: string; duplicado_em: DuplicateRef | null }
@@ -152,6 +173,15 @@ export class NexusApi {
   async image(id: string, miniatura = true, signal?: AbortSignal) { return (await this.response(`/imagens/${id}?miniatura=${miniatura}`, { signal })).blob(); }
   networkAccess(signal?: AbortSignal) { return this.json<NetworkAccess>('/acesso-rede', { signal }); }
   setNetworkAccess(ativo: boolean, porta?: number) { return this.json<NetworkAccess>('/acesso-rede', { method: 'PUT', body: JSON.stringify(porta ? { ativo, porta } : { ativo }) }); }
+  trophySources(signal?: AbortSignal) { return this.json<TrophySources>('/trofeus/fontes', { signal }); }
+  /** Vincula uma fonte oficial de troféus; aceito só neste computador. A chave vai para um arquivo local e nunca volta. */
+  linkTrophySource(fonte: TrophySource, api_key: string, identificacao: string) { return this.json<TrophySourceStatus & { aviso: string }>(`/trofeus/fontes/${fonte}`, { method: 'PUT', body: JSON.stringify({ api_key, identificacao }) }); }
+  unlinkTrophySource(fonte: TrophySource) { return this.json<void>(`/trofeus/fontes/${fonte}`, { method: 'DELETE' }); }
+  trophyGames(fonte: TrophySource, modo: 'recentes' | 'possuidos' = 'recentes', signal?: AbortSignal) { return this.json<{ modo: string; itens: TrophyGameItem[] }>(`/trofeus/${fonte}/jogos?${new URLSearchParams({ modo })}`, { signal }); }
+  importTrophyGames(fonte: TrophySource, ids: string[], modo: 'recentes' | 'possuidos' = 'recentes', colecao_id: number | null = null) {
+    return this.json<TrophyImportResult>(`/trofeus/${fonte}/importar`, { method: 'POST', body: JSON.stringify(colecao_id ? { ids, modo, colecao_id } : { ids, modo }) });
+  }
+  syncTrophies(jogo_id: number | null = null) { return this.json<TrophySyncResult>('/trofeus/sincronizar', { method: 'POST', body: JSON.stringify(jogo_id ? { jogo_id } : {}) }); }
   avatar(imagem_id: string | null) { return this.json<{ avatar_id: string | null }>('/conta/avatar', { method: 'PUT', body: JSON.stringify({ imagem_id }) }); }
   password(senha_atual: string, nova_senha: string, confirmar_senha: string) { return this.json<void>('/conta/senha', { method: 'PUT', body: JSON.stringify({ senha_atual, nova_senha, confirmar_senha }) }); }
 }

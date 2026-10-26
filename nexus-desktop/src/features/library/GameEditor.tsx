@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { BookOpen, CalendarDays, CheckCircle2, ImagePlus, Save, Search, Trash2, Trophy } from 'lucide-react';
+import { BookOpen, CalendarDays, CheckCircle2, ImagePlus, ListChecks, Save, Search, Trash2, Trophy } from 'lucide-react';
 import { Button, Modal } from '../../components/ui';
 import { useBackend } from '../../services/BackendProvider';
-import type { Collection, CoverCandidate, CoverSource, DuplicateRef, ExternalDetails, GameInput } from '../../services/api';
+import { SOURCE_NAMES, type Collection, type CoverCandidate, type DuplicateRef, type ExternalDetails, type ExternalSource, type Ficha, type GameInput } from '../../services/api';
 import { CoverImage } from './CoverImage';
 import { CoverSearch } from './CoverSearch';
 import { applyChanges, candidateKey, fillSummary, mergeDetails, safeHttpsUrl, type FillChange } from './coverModel';
 import { GameCalendar } from './GameCalendar';
-import { blankGame, gamePayload, trophies } from './model';
+import { FICHA_KEYS, blankGame, fichaCount, gamePayload, trophies } from './model';
 import { journeyDays, playedDays, type Schedule } from './schedule';
 
-const SOURCE_LABELS: Record<CoverSource, string> = { steam: 'Steam', wikipedia: 'Wikipedia', igdb: 'IGDB' };
+const SOURCE_LABELS = SOURCE_NAMES;
+const TIME_FIELDS: { key: 'tempo_historia' | 'tempo_extras' | 'tempo_completo'; label: string }[] = [{ key: 'tempo_historia', label: 'História' }, { key: 'tempo_extras', label: 'Com extras' }, { key: 'tempo_completo', label: '100%' }];
+/** "Português - Brasil, Inglês; Francês" → lista limpa; usada nos campos de idiomas e categorias. */
+const splitList = (value: string) => value.split(/[,;\n]/).map(part => part.trim()).filter(Boolean);
 
 /** Valor de um campo na caixa de confirmação: datas em pt-BR e textos longos encurtados. */
 function shown(field: FillChange['field'], value: string) {
@@ -78,6 +81,7 @@ export function GameEditor({ gameId, collections, onClose, onSaved }: { gameId: 
     setForm(old => ({ ...old, trofeus_total: value, trofeus_fonte: '', trofeus_escopo: '', trofeus_consultado_em: null }));
     touched.current.add('trofeus_total'); setDirty(true);
   }
+  function fichaField<K extends keyof Ficha>(key: K, value: Ficha[K]) { touched.current.add('ficha'); setForm(old => ({ ...old, ficha: { ...old.ficha, [key]: value } })); setDirty(true); }
   async function save(event: FormEvent) {
     event.preventDefault(); if (!loaded || loading || busy) return; setError(''); setBusy(true);
     try { const payload = gamePayload(form); if (gameId === null) await api.createGame(payload); else await api.patchGame(gameId, payload); onSaved(); }
@@ -151,6 +155,18 @@ export function GameEditor({ gameId, collections, onClose, onSaved }: { gameId: 
           <label htmlFor="game-publisher" className="field-label">Publicadora</label><input id="game-publisher" className="input" value={form.publicadora} onChange={e => field('publicadora', e.target.value)} maxLength={200} />
           <label htmlFor="game-description" className="field-label">Descrição</label><textarea id="game-description" className="input description-input" value={form.descricao} onChange={e => field('descricao', e.target.value)} maxLength={4000} />
           <p className="muted fill-source">{form.fonte_externa ? <>Dados de {SOURCE_LABELS[form.fonte_externa]}{safeHttpsUrl(form.url_origem) && <>, <a href={safeHttpsUrl(form.url_origem)} target="_blank" rel="noreferrer noopener">página de origem</a></>}. </> : null}A data de lançamento é do jogo; início e término, no calendário, são da sua jornada.</p>
+          <details className="ficha-details" open={fichaCount(form.ficha) > 0}>
+            <summary><ListChecks size={16} /> Ficha completa <span className="muted">{fichaCount(form.ficha)} de {FICHA_KEYS.length} itens</span></summary>
+            <p className="muted fill-source">Preenchida ao escolher um resultado da Steam (requisitos, idiomas, classificação indicativa, categorias, Metacritic) ou da IGDB (tempo de jogo, quando configurada). Tudo editável; só campos vazios são preenchidos.</p>
+            <div className="field-pair"><div><label htmlFor="ficha-rating" className="field-label">Classificação indicativa</label><input id="ficha-rating" className="input" value={form.ficha.classificacao} onChange={e => fichaField('classificacao', e.target.value)} maxLength={80} placeholder="ClassInd 16 anos" /></div><div><label htmlFor="ficha-metacritic" className="field-label">Metacritic</label><input id="ficha-metacritic" className="input" type="number" min={0} max={100} value={form.ficha.metacritic ?? ''} onChange={e => fichaField('metacritic', e.target.value === '' ? null : Math.max(0, Math.min(100, Math.round(Number(e.target.value)))))} /></div></div>
+            <label htmlFor="ficha-rating-detail" className="field-label">Descritores da classificação</label><input id="ficha-rating-detail" className="input" value={form.ficha.classificacao_detalhe} onChange={e => fichaField('classificacao_detalhe', e.target.value)} maxLength={300} placeholder="Violência, linguagem imprópria…" />
+            <span className="field-label" id="ficha-time-label">Tempo de jogo (horas)</span>
+            <div className="ficha-times" role="group" aria-labelledby="ficha-time-label">{TIME_FIELDS.map(({ key, label }) => <div key={key}><label htmlFor={`ficha-${key}`} className="ficha-time-label">{label}</label><input id={`ficha-${key}`} className="input" type="number" min={0} max={1600} step={0.5} value={form.ficha[key] === null ? '' : Math.round(form.ficha[key] / 6) / 10} onChange={e => fichaField(key, e.target.value === '' ? null : Math.max(0, Math.round(Number(e.target.value) * 60)))} /></div>)}</div>
+            <label htmlFor="ficha-languages" className="field-label">Idiomas <span>{form.ficha.idiomas.length ? `${form.ficha.idiomas.length} idioma${form.ficha.idiomas.length === 1 ? '' : 's'}` : ''}</span></label><input key={`idiomas:${form.ficha.idiomas.join('|')}`} id="ficha-languages" className="input" defaultValue={form.ficha.idiomas.join(', ')} onBlur={e => { const next = splitList(e.target.value); if (next.join('|') !== form.ficha.idiomas.join('|')) fichaField('idiomas', next); }} placeholder="Português - Brasil (áudio), Inglês" />
+            <label htmlFor="ficha-categories" className="field-label">Categorias</label><input key={`categorias:${form.ficha.categorias.join('|')}`} id="ficha-categories" className="input" defaultValue={form.ficha.categorias.join(', ')} onBlur={e => { const next = splitList(e.target.value); if (next.join('|') !== form.ficha.categorias.join('|')) fichaField('categorias', next); }} placeholder="Um jogador, Suporte a controle" />
+            <label htmlFor="ficha-min" className="field-label">Requisitos mínimos</label><textarea id="ficha-min" className="input requirements-input" value={form.ficha.requisitos_minimos} onChange={e => fichaField('requisitos_minimos', e.target.value)} maxLength={3000} />
+            <label htmlFor="ficha-rec" className="field-label">Requisitos recomendados</label><textarea id="ficha-rec" className="input requirements-input" value={form.ficha.requisitos_recomendados} onChange={e => fichaField('requisitos_recomendados', e.target.value)} maxLength={3000} />
+          </details>
         </div>
         <div><div className="editor-cover"><CoverImage imageId={form.capa_id} name={form.nome || 'Novo jogo'} full /></div><div className="control-row"><label className="button button-secondary upload-button"><ImagePlus size={16} /> Escolher capa<input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={e => { const selected = e.target.files?.[0]; if (selected) void image(selected); e.target.value = ''; }} /></label><Button onClick={removeCover} disabled={!form.capa_id}>Remover capa</Button></div>
           {(autoBusy || autoNote) && <p role="status" className={`muted cover-auto-note ${autoBusy ? 'is-busy' : ''}`}><Search size={14} /> {autoBusy ? 'Procurando a capa pelo nome…' : autoNote}</p>}
@@ -164,7 +180,7 @@ export function GameEditor({ gameId, collections, onClose, onSaved }: { gameId: 
           <p className="calendar-hint">Dias de jornada são corridos, do início até hoje (ou até o término). Dias em que joguei são só os dias marcados como sessão no calendário; sequências e dias futuros não contam.</p>
           <GameCalendar schedule={schedule} onChange={scheduleChanged} jump={jump} journey={journey} />
           <h3 className="trophy-heading"><Trophy size={17} /> Conquistas / Troféus</h3><div className="field-pair"><div><label htmlFor="game-earned" className="field-label">Troféus obtidos</label><input id="game-earned" className="input" type="number" min={0} max={form.trofeus_total} value={form.trofeus_obtidos} onChange={e => field('trofeus_obtidos', Number(e.target.value))} required /></div><div><label htmlFor="game-total" className="field-label">Total de troféus</label><input id="game-total" className="input" type="number" min={0} max={1000000} value={form.trofeus_total} onChange={e => trophyTotal(Number(e.target.value))} required /></div></div><progress className="trophy-progress" max={100} value={values.percent} aria-label="Progresso de troféus" /><p className="muted">{values.platinum ? 'Platinado!' : form.trofeus_total ? `${values.percent}% · ${values.remaining} troféus restantes` : 'Total não informado'}</p>
-          <p className="muted fill-source">{form.trofeus_fonte ? `Total de ${form.trofeus_total} troféus da fonte ${SOURCE_LABELS[form.trofeus_fonte as CoverSource] ?? form.trofeus_fonte} (${form.trofeus_escopo || 'jogo base'}, ${form.plataforma}), consultado em ${formatMoment(form.trofeus_consultado_em)}. Editar o total torna o valor manual.` : 'Total manual. Ao escolher um resultado da Steam, o total de conquistas da edição é sugerido; PlayStation, Xbox e Nintendo não têm fonte pública confiável, então ficam como “não informado” até você preencher.'}</p>
+          <p className="muted fill-source">{form.trofeus_fonte ? `Total de ${form.trofeus_total} troféus da fonte ${SOURCE_LABELS[form.trofeus_fonte as ExternalSource] ?? form.trofeus_fonte} (${form.trofeus_escopo || 'jogo base'}, ${form.plataforma}), consultado em ${formatMoment(form.trofeus_consultado_em)}. Editar o total torna o valor manual.` : 'Total manual. Ao escolher um resultado da Steam, o total de conquistas da edição é sugerido. Com a Steam ou o RetroAchievements vinculados em Conta e preferências, obtidos e total sincronizam pela sua conta; PlayStation, Xbox e Nintendo não têm fonte oficial, então ficam manuais.'}</p>
         </div>
       </fieldset>
       {pending && <div className="confirm-box" role="alertdialog" aria-labelledby="fill-confirm-title" aria-describedby="fill-confirm-list"><p id="fill-confirm-title">Alguns campos já estavam preenchidos. Substituir pelos dados da fonte?</p>

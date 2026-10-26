@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 
 from . import igdb
 from .images import IMAGE_TYPES, MAX_BYTES, fetch
+from .models import Ficha
 from .platforms import nexus_platforms, suggest_genre
 
 MAX_JSON_BYTES = 1024 * 1024
@@ -41,7 +42,8 @@ STEAM_IMAGE_BASE = 'https://shared.steamstatic.com/store_item_assets/steam/apps'
 WIKIPEDIA_HOSTS = {'pt.wikipedia.org', 'en.wikipedia.org'}
 WIKIDATA_HOSTS = {'www.wikidata.org'}
 WIKIPEDIA_IMAGE_HOSTS = {'upload.wikimedia.org'}
-IMAGE_HOSTS = {'steam': STEAM_IMAGE_HOSTS, 'wikipedia': WIKIPEDIA_IMAGE_HOSTS, 'igdb': igdb.IMAGE_HOSTS}
+RETRO_IMAGE_HOSTS = {'media.retroachievements.org'}  # capas dos jogos vinculados pelo RetroAchievements (trophies.py)
+IMAGE_HOSTS = {'steam': STEAM_IMAGE_HOSTS, 'wikipedia': WIKIPEDIA_IMAGE_HOSTS, 'igdb': igdb.IMAGE_HOSTS, 'retroachievements': RETRO_IMAGE_HOSTS}
 # Famílias de plataforma para o filtro da busca; nomes vindos das fontes são comparados por estas expressões.
 FAMILY_PATTERNS = {
     'pc': re.compile(r'windows|\bpc\b|mac|linux|steam', re.I), 'playstation': re.compile(r'playstation|\bps[1-5p]\b|vita', re.I),
@@ -88,7 +90,7 @@ def _image_allowed(url: str, hosts: set[str]) -> bool:
 
 def fetch_preview(url: str) -> tuple[str, bytes]:
     """Prévia de um candidato, buscada pelo serviço: a interface nunca fala direto com os CDNs das fontes."""
-    hosts = STEAM_IMAGE_HOSTS | WIKIPEDIA_IMAGE_HOSTS | igdb.IMAGE_HOSTS
+    hosts = STEAM_IMAGE_HOSTS | WIKIPEDIA_IMAGE_HOSTS | igdb.IMAGE_HOSTS | RETRO_IMAGE_HOSTS
     if not _image_allowed(url, hosts):
         raise ValueError('Prévia fora das fontes permitidas.')
     return fetch(url, 'image/png,image/jpeg,image/webp', IMAGE_TYPES, MAX_PREVIEW_BYTES, hosts, 10)
@@ -115,6 +117,51 @@ def _text(value, limit: int) -> str:
     # Corta antes do regex e limita cada tag para que texto hostil não custe tempo quadrático de CPU.
     clean = html.unescape(re.sub(r'<[^<>]{0,500}>', ' ', value[:limit * 4]))
     return re.sub(r'\s+([!?,.;:])', r'\1', re.sub(r'\s+', ' ', clean)).strip()[:limit]
+
+
+def _html_lines(value, limit: int) -> str:
+    """HTML curto (requisitos da Steam) → texto com uma linha por item, sem tags nem o rótulo "Mínimos:/Recomendados:"."""
+    if not isinstance(value, str):
+        return ''
+    text = re.sub(r'<br\s*/?>|</li>|</p>|</ul>', '\n', value[:limit * 4], flags=re.I)
+    text = html.unescape(re.sub(r'<[^<>]{0,500}>', ' ', text))
+    lines = [re.sub(r'\s+', ' ', line).strip() for line in text.split('\n')]
+    lines = [line for line in lines if line and not re.fullmatch(r'(m[ií]nimos?|recomendados?|minimum|recommended):?', line, re.I)]
+    return '\n'.join(lines)[:limit]
+
+
+def _languages(value) -> list[str]:
+    """"Português - Brasil<strong>*</strong>, Inglês<br>*idiomas com áudio" → ['Português - Brasil (áudio)', 'Inglês']."""
+    if not isinstance(value, str):
+        return []
+    head = re.split(r'<br\s*/?>', value[:4000], maxsplit=1, flags=re.I)[0]
+    head = html.unescape(re.sub(r'<[^<>]{0,500}>', '', head))
+    result = []
+    for part in head.split(','):
+        name = re.sub(r'\s+', ' ', part).strip()
+        audio = name.endswith('*')
+        name = name.rstrip('* ').strip()[:50]
+        label = name + (' (áudio)' if audio else '')
+        if name and label not in result:
+            result.append(label)
+    return result[:60]
+
+
+RATING_SYSTEMS = (('dejus', 'ClassInd'), ('pegi', 'PEGI'), ('esrb', 'ESRB'), ('usk', 'USK'))
+
+
+def _age_rating(ratings) -> tuple[str, str]:
+    """Classificação indicativa: ClassInd (Brasil) primeiro, depois PEGI, ESRB e USK, com os descritores da fonte."""
+    if not isinstance(ratings, dict):
+        return '', ''
+    for key, label in RATING_SYSTEMS:
+        entry = ratings.get(key)
+        rating = _text(entry.get('rating'), 20) if isinstance(entry, dict) else ''
+        if not rating:
+            continue
+        value = ('Livre' if rating.lower() == 'l' else f'{rating} anos') if key == 'dejus' else rating.upper()
+        return f'{label} {value}'[:80], _text(entry.get('descriptors'), 300)
+    return '', ''
 
 
 def _strings(values, limit: int = 8) -> list[str]:
@@ -155,6 +202,8 @@ def _details(source: str, external_id: str, title: str, image: str | None, origi
             'generos': genres, 'genero': suggest_genre(genres),
             'desenvolvedores': extra.get('desenvolvedores', [])[:8], 'publicadoras': extra.get('publicadoras', [])[:8],
             'descricao': extra.get('descricao', ''), 'atribuicao': SOURCE_ATTRIBUTION[source], 'parcial': bool(extra.get('parcial', False)),
+            # Ficha completa (requisitos, idiomas, classificação, tempo de jogo, categorias), já validada nos limites do modelo.
+            'ficha': Ficha.model_validate(extra.get('ficha') or {}).model_dump(),
             # Total de troféus/conquistas da edição consultada, quando a fonte o publica; zero ou ausência viram "não informado" (None).
             'trofeus_total': extra.get('trofeus_total'), 'trofeus_fonte': source if extra.get('trofeus_total') else '',
             'trofeus_escopo': 'jogo base' if extra.get('trofeus_total') else '',
@@ -191,7 +240,8 @@ def steam_details(app_id: str, fetch_json=fetch_json) -> dict:
     if not re.fullmatch(r'[0-9]{1,10}', app_id):
         raise ValueError('Identificador inválido para a Steam.')
     url = 'https://store.steampowered.com/api/appdetails?' + urlencode({'appids': app_id, 'l': 'portuguese', 'cc': 'BR',
-                                                                        'filters': 'basic,genres,release_date,developers,publishers,platforms,achievements'})
+                                                                        'filters': 'basic,genres,release_date,developers,publishers,platforms,achievements,'
+                                                                                   'pc_requirements,supported_languages,ratings,metacritic,categories'})
     entry = fetch_json(url, STEAM_HOSTS).get(app_id)
     data = entry.get('data') if isinstance(entry, dict) and entry.get('success') else None
     if not isinstance(data, dict) or not isinstance(data.get('name'), str):
@@ -203,10 +253,17 @@ def steam_details(app_id: str, fetch_json=fetch_json) -> dict:
     achievements = data.get('achievements') if isinstance(data.get('achievements'), dict) else {}
     total = achievements.get('total')
     trophies = total if type(total) is int and 0 < total <= 100000 else None  # Steam só conta conquistas do jogo base; zero = não informado.
+    requirements = data.get('pc_requirements') if isinstance(data.get('pc_requirements'), dict) else {}
+    rating, rating_detail = _age_rating(data.get('ratings'))
+    metacritic = data.get('metacritic', {}).get('score') if isinstance(data.get('metacritic'), dict) else None
+    categories = [c.get('description') for c in data.get('categories', []) if isinstance(c, dict)] if isinstance(data.get('categories'), list) else []
+    ficha = {'requisitos_minimos': _html_lines(requirements.get('minimum'), 3000), 'requisitos_recomendados': _html_lines(requirements.get('recommended'), 3000),
+             'idiomas': _languages(data.get('supported_languages')), 'classificacao': rating, 'classificacao_detalhe': rating_detail,
+             'metacritic': metacritic if type(metacritic) is int and 0 <= metacritic <= 100 else None, 'categorias': _strings(categories, 30)}
     return _details('steam', app_id, _text(data['name'], 150), steam_image(app_id), f'https://store.steampowered.com/app/{app_id}/',
                     data_lancamento=date, ano=year, plataformas=[label for key, label in STEAM_PLATFORM_LABELS.items() if flags.get(key)],
                     generos=_strings(genres), desenvolvedores=_strings(data.get('developers')), publicadoras=_strings(data.get('publishers')),
-                    descricao=_text(data.get('short_description'), MAX_DESCRIPTION), trofeus_total=trophies)
+                    descricao=_text(data.get('short_description'), MAX_DESCRIPTION), trofeus_total=trophies, ficha=ficha)
 
 
 # --- Wikipedia + Wikidata ----------------------------------------------------------------------------------------------
@@ -380,9 +437,10 @@ def _wikipedia_summary(language: str, selector: dict, fetch_json) -> tuple[str |
 
 SOURCES = {'steam': search_steam, 'wikipedia': search_wikipedia, 'igdb': None}  # IGDB é resolvida em search_covers, porque depende de chave local.
 DETAILS = {'steam': steam_details, 'wikipedia': wikipedia_details}
-SOURCE_LABELS = {'steam': 'Steam', 'wikipedia': 'Wikipedia', 'igdb': 'IGDB'}
+SOURCE_LABELS = {'steam': 'Steam', 'wikipedia': 'Wikipedia', 'igdb': 'IGDB', 'retroachievements': 'RetroAchievements'}
 SOURCE_ATTRIBUTION = {'steam': 'Dados e capa da loja Steam (Valve).', 'wikipedia': 'Dados do Wikidata (CC0) e resumo/imagem da Wikipedia (CC BY-SA).',
-                      'igdb': 'Dados e capas da IGDB (Twitch), uso não comercial.'}
+                      'igdb': 'Dados e capas da IGDB (Twitch), uso não comercial.',
+                      'retroachievements': 'Dados e imagens do RetroAchievements (comunidade), com a sua chave pessoal.'}
 IGDB_HINT = 'IGDB não configurada: consoles dependem da Wikipedia/Wikidata. Para ativar, crie igdb.json na pasta de dados (veja a documentação).'
 
 
@@ -481,7 +539,7 @@ def game_details(source: str, external_id: str, fetch_json=fetch_json, cache: Ca
         raw = igdb.details(igdb_config, external_id)
         result = _details('igdb', external_id, raw['titulo'], raw['imagem'], raw['origem'], data_lancamento=raw['data_lancamento'], ano=raw['ano'],
                           plataformas=raw['plataformas'], generos=raw['generos'], desenvolvedores=raw['desenvolvedores'], publicadoras=raw['publicadoras'],
-                          descricao=_text(raw['descricao'], MAX_DESCRIPTION))
+                          descricao=_text(raw['descricao'], MAX_DESCRIPTION), ficha=raw.get('ficha'))
         if cache is not None:
             cache.set(key, result)
         return result

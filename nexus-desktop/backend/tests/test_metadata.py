@@ -234,7 +234,7 @@ def test_migration_to_schema_4_keeps_every_game_and_adds_optional_fields(tmp_pat
     conn.close()
     db.initialize()
     with db.connection() as conn:
-        assert conn.execute('PRAGMA user_version').fetchone()[0] == SCHEMA_VERSION == 5
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == SCHEMA_VERSION == 6
         rows = [dict(row) for row in conn.execute('SELECT * FROM jogos ORDER BY id')]
     assert [row['nome'] for row in rows] == ['Alan Wake 2', 'Control']
     assert rows[0]['progresso'] == 65 and rows[0]['data_inicio'] == '2026-09-07' and rows[0]['notas'] == 'minhas notas' and rows[0]['genero'] == 'Terror'
@@ -242,4 +242,4 @@ def test_migration_to_schema_4_keeps_every_game_and_adds_optional_fields(tmp_pat
     with TestClient(create_app(tmp_path)) as client:
         session = client.post('/api/sessao', json={'perfil_id': 1, 'senha': 'qualquer'})
         assert session.status_code == 401, 'the synthetic hash is not a real password; the app still opens the migrated database'
-        assert client.get('/api/saude').json()['schema'] == 5
+        assert client.get('/api/saude').json()["schema"] == 6
