@@ -34,7 +34,7 @@ def test_backup_contains_consistent_snapshot_images_and_verifiable_manifest(tmp_
         made = client.post('/api/manutencao/backups', headers=headers)
         assert made.status_code == 201, made.text
         info = made.json()
-        assert info['valido'] and info['manifesto']['contagens'] == {'usuarios': 1, 'jogos': 1, 'colecoes': 0, 'imagens': 1} and info['manifesto']['imagens_arquivos'] == 2
+        assert info['valido'] and info['manifesto']['contagens'] == {'usuarios': 1, 'jogos': 1, 'colecoes': 0, 'imagens': 1, 'avatares': 0} and info['manifesto']['imagens_arquivos'] == 2
         path = tmp_path / 'backups' / info['nome']
         with zipfile.ZipFile(path) as archive:
             names = set(archive.namelist())

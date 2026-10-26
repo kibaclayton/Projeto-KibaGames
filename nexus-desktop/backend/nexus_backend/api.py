@@ -19,11 +19,11 @@ from starlette.concurrency import run_in_threadpool
 from .covers import DETAILS_CACHE_SECONDS, SEARCH_CACHE_SECONDS, SOURCES, Cache, Throttle, download_cover, fetch_preview, game_details, search_covers
 from .database import Database, data_directory, normalize
 from .images import MAX_BYTES, download_image, store_image
-from . import maintenance
-from .models import CandidateRef, CollectionInput, Crop, DeviceToken, GameInput, ImageRef, Login, NetworkInput, PasswordChange, PasswordReset, ProfileCreate, RemoteImage
+from . import avatars, igdb, maintenance
+from .models import AvatarSlot, CandidateRef, CollectionInput, Crop, DeviceToken, GameInput, ImageRef, Login, NetworkInput, OrderInput, PasswordChange, PasswordReset, PreferencesInput, ProfileCreate, RemoteImage
 from .network import LOOPBACK, NetworkAccess
 from .security import Sessions, check_password, device_login, encode_password, forget_device, forget_devices, list_devices, remember_device
-from .service import SUMMARY_COLUMNS, find_duplicate, game_result, owned, save_collection, save_game, validate_image
+from .service import SUMMARY_COLUMNS, find_duplicate, game_result, owned, reorder_games, save_collection, save_game, validate_image
 
 ORIGINS = ['http://127.0.0.1:1420', 'http://localhost:1420', 'http://127.0.0.1:4173',
            'http://localhost:4173', 'http://127.0.0.1:8765', 'http://localhost:8765',
@@ -237,10 +237,56 @@ def create_app(directory: Path | None = None):
 
     @app.put('/api/conta/avatar')
     def avatar(model: ImageRef, user_id: User):
+        # Define a foto ativa. Uma imagem fora da galeria entra na primeira posição livre; com cinco ocupadas, a interface pede qual substituir.
         with db.connection() as conn:
             validate_image(conn, model.imagem_id, user_id, 'avatar')
+            if model.imagem_id:
+                avatars.ensure_in_gallery(conn, user_id, model.imagem_id)
             conn.execute('UPDATE usuarios SET avatar_id=? WHERE id=?', (model.imagem_id, user_id))
         return {'avatar_id': model.imagem_id}
+
+    @app.get('/api/conta/avatares')
+    def avatar_gallery(user_id: User):
+        with db.connection() as conn:
+            return avatars.gallery(conn, user_id)
+
+    @app.put('/api/conta/avatares/{posicao}')
+    def avatar_slot(posicao: int, model: AvatarSlot, user_id: User):
+        if not 1 <= posicao <= avatars.SLOTS:
+            raise HTTPException(422, 'Posição inválida.')
+        with db.connection() as conn:
+            validate_image(conn, model.imagem_id, user_id, 'avatar')
+            return avatars.set_slot(conn, user_id, posicao, model.imagem_id)
+
+    @app.delete('/api/conta/avatares/{posicao}')
+    def avatar_slot_remove(posicao: int, user_id: User):
+        with db.connection() as conn:
+            return avatars.remove_slot(conn, user_id, posicao)
+
+    @app.get('/api/avatares/busca')
+    def avatar_search(user_id: User, termo: str = Query(..., min_length=2, max_length=80)):
+        if not cover_throttle.allow(user_id):
+            raise HTTPException(429, 'Muitas buscas seguidas. Aguarde um minuto.', headers={'Retry-After': '60'})
+        try:
+            return {'itens': avatars.search_commons(termo.strip())}
+        except (ValueError, OSError, http.client.HTTPException) as exc:
+            raise HTTPException(503, f'Busca de imagens indisponível no momento ({exc}).') from exc
+
+    @app.get('/api/conta/preferencias')
+    def preferences(user_id: User):
+        with db.connection() as conn:
+            row = conn.execute('SELECT preferencias FROM usuarios WHERE id=?', (user_id,)).fetchone()
+        try:
+            stored = json.loads(row['preferencias'] or '{}')
+        except ValueError:
+            stored = {}
+        return PreferencesInput.model_validate({k: v for k, v in stored.items() if k in PreferencesInput.model_fields}).model_dump()
+
+    @app.put('/api/conta/preferencias')
+    def save_preferences(model: PreferencesInput, user_id: User):
+        with db.connection() as conn:
+            conn.execute('UPDATE usuarios SET preferencias=? WHERE id=?', (json.dumps(model.model_dump(), ensure_ascii=False), user_id))
+        return model.model_dump()
 
     def from_this_computer(request: Request) -> bool:
         return request.client is not None and request.client.host in LOOPBACK
@@ -280,7 +326,11 @@ def create_app(directory: Path | None = None):
 
     @app.get('/api/jogos')
     def games(user_id: User, busca: str = Query('', max_length=150), genero: str = Query('', max_length=80), favorito: bool = False,
-              colecao_id: int | None = Query(None, gt=0), limite: int = Query(40, ge=1, le=100), pagina: int = Query(1, ge=1, le=100000)):
+              colecao_id: int | None = Query(None, gt=0), limite: int = Query(40, ge=1, le=100), pagina: int = Query(1, ge=1, le=100000),
+              ordenacao: Literal['minha', 'nome', 'recentes', 'progresso', 'colecao'] = 'minha'):
+        # 'minha' = ordem manual da biblioteca (posicao); 'colecao' = sequência dentro da coleção (ordem), usada ao abrir uma pasta.
+        orders = {'minha': 'posicao,id', 'nome': 'nome_chave,id', 'recentes': 'atualizado DESC,id DESC', 'progresso': 'progresso DESC,nome_chave,id', 'colecao': 'ordem,nome_chave,id'}
+        order_by = orders[ordenacao]
         clauses, params = ['usuario_id=?'], [user_id]
         if busca:
             key = normalize(busca).replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
@@ -297,13 +347,19 @@ def create_app(directory: Path | None = None):
         where = ' AND '.join(clauses)
         with db.connection() as conn:
             total = conn.execute('SELECT count(*) FROM jogos WHERE ' + where, params).fetchone()[0]
-            rows = conn.execute(f'SELECT {SUMMARY_COLUMNS} FROM jogos WHERE {where} ORDER BY ordem,nome_chave,id LIMIT ? OFFSET ?', (*params, limite, (pagina - 1) * limite))
+            rows = conn.execute(f'SELECT {SUMMARY_COLUMNS} FROM jogos WHERE {where} ORDER BY {order_by} LIMIT ? OFFSET ?', (*params, limite, (pagina - 1) * limite))
             return {'itens': [game_result(row) for row in rows], 'total': total, 'pagina': pagina, 'limite': limite}
 
     @app.get('/api/destaques')
     def highlights(user_id: User):
         with db.connection() as conn:
             return [game_result(row) for row in conn.execute(f"SELECT {SUMMARY_COLUMNS} FROM jogos WHERE usuario_id=? AND progresso>0 AND progresso<100 AND status_avancado NOT IN ('Concluído','Abandonado','Pausado','Na fila') ORDER BY progresso DESC,nome_chave,id LIMIT 20", (user_id,))]
+
+    @app.put('/api/jogos/ordem')
+    def order_games(model: OrderInput, user_id: User):
+        """Ordem manual da biblioteca: atômica e limitada ao perfil autenticado; a sequência das coleções (`ordem`) não muda."""
+        with db.connection() as conn:
+            return {'total': reorder_games(conn, user_id, model.ids)}
 
     @app.post('/api/jogos', status_code=201)
     def create_game(model: GameInput, user_id: User):
@@ -501,21 +557,27 @@ def create_app(directory: Path | None = None):
         return {'revertendo': True, 'fechando': app.state.shutdown is not None}
 
     @app.get('/api/capas/busca')
-    def cover_search(user_id: User, nome: str = Query(..., min_length=2, max_length=120), fonte: Literal['todas', 'steam', 'wikipedia'] = 'todas'):
-        # Fontes públicas sem chave; cada candidato traz um identificador estável para buscar a ficha depois.
+    def cover_search(user_id: User, nome: str = Query(..., min_length=2, max_length=120), fonte: Literal['todas', 'steam', 'wikipedia', 'igdb'] = 'todas',
+                     plataforma: Literal['todas', 'pc', 'playstation', 'xbox', 'nintendo'] = 'todas'):
+        # Fontes públicas sem chave (Steam, Wikipedia/Wikidata) e IGDB opcional com chave local; cada candidato traz um id estável.
         if not cover_throttle.allow(user_id):
             raise HTTPException(429, 'Muitas buscas seguidas. Aguarde um minuto.', headers={'Retry-After': '60'})
         sources = tuple(SOURCES) if fonte == 'todas' else (fonte,)
-        return search_covers(nome.strip(), sources, cache=search_cache)
+        result = search_covers(nome.strip(), sources, cache=search_cache, family=plataforma, igdb_config=igdb.load_config(db.directory))
+        return {**result, 'igdb_configurada': igdb.configured(db.directory)}
+
+    @app.get('/api/capas/fontes')
+    def cover_sources(user_id: User):
+        return {'igdb_configurada': igdb.configured(db.directory), 'arquivo_igdb': str(igdb.config_path(db.directory))}
 
     def external_details(source: str, external_id: str) -> dict:
         try:
-            return game_details(source, external_id, cache=details_cache)
+            return game_details(source, external_id, cache=details_cache, igdb_config=igdb.load_config(db.directory))
         except (ValueError, OSError, http.client.HTTPException) as exc:
             raise HTTPException(404, f'Não foi possível obter os detalhes deste jogo na fonte ({exc}).') from exc
 
     @app.get('/api/capas/detalhes')
-    def cover_details(user_id: User, fonte: Literal['steam', 'wikipedia'], id: str = Query(..., min_length=1, max_length=64, pattern=r'^[A-Za-z0-9:_-]+$'), jogo_id: int | None = Query(None, gt=0)):
+    def cover_details(user_id: User, fonte: Literal['steam', 'wikipedia', 'igdb'], id: str = Query(..., min_length=1, max_length=64, pattern=r'^[A-Za-z0-9:_-]+$'), jogo_id: int | None = Query(None, gt=0)):
         if not details_throttle.allow(user_id):
             raise HTTPException(429, 'Muitas consultas seguidas. Aguarde um minuto.', headers={'Retry-After': '60'})
         details = external_details(fonte, id)

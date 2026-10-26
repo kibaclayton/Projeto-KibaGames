@@ -4,7 +4,7 @@ import os
 import sqlite3
 import unicodedata
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 def normalize(value: str) -> str:
@@ -90,6 +90,27 @@ ALTER TABLE jogos ADD COLUMN id_externo TEXT NOT NULL DEFAULT '';
 ALTER TABLE jogos ADD COLUMN url_origem TEXT NOT NULL DEFAULT '';
 CREATE INDEX idx_jogos_externo ON jogos(usuario_id,fonte_externa,id_externo);
 PRAGMA user_version = 4;
+""",
+    # Jornada em andamento, ordem manual da biblioteca, origem do total de troféus, preferências visuais por perfil e
+    # galeria de até cinco avatares. Tudo opcional; a posição manual nasce igual ao id para manter a ordem de cadastro.
+    5: """
+ALTER TABLE jogos ADD COLUMN ainda_jogando INTEGER NOT NULL DEFAULT 0 CHECK(ainda_jogando IN (0,1));
+ALTER TABLE jogos ADD COLUMN posicao INTEGER;
+ALTER TABLE jogos ADD COLUMN trofeus_fonte TEXT NOT NULL DEFAULT '';
+ALTER TABLE jogos ADD COLUMN trofeus_escopo TEXT NOT NULL DEFAULT '';
+ALTER TABLE jogos ADD COLUMN trofeus_consultado_em TEXT;
+ALTER TABLE usuarios ADD COLUMN preferencias TEXT NOT NULL DEFAULT '{}';
+CREATE TABLE avatares (
+ usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+ posicao INTEGER NOT NULL CHECK(posicao BETWEEN 1 AND 5),
+ imagem_id TEXT NOT NULL REFERENCES imagens(id),
+ criado TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+ PRIMARY KEY(usuario_id, posicao)
+);
+UPDATE jogos SET posicao = id WHERE posicao IS NULL;
+INSERT INTO avatares(usuario_id, posicao, imagem_id) SELECT id, 1, avatar_id FROM usuarios WHERE avatar_id IS NOT NULL;
+CREATE INDEX idx_jogos_posicao ON jogos(usuario_id,posicao);
+PRAGMA user_version = 5;
 """,
 }
 

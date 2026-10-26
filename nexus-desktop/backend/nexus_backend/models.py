@@ -94,9 +94,15 @@ class GameInput(Model):
     desenvolvedor: str = Field(default='', max_length=200)
     publicadora: str = Field(default='', max_length=200)
     descricao: str = Field(default='', max_length=4000)
-    fonte_externa: Literal['', 'steam', 'wikipedia'] = ''
+    fonte_externa: Literal['', 'steam', 'wikipedia', 'igdb'] = ''
     id_externo: str = Field(default='', max_length=64, pattern=r'^[A-Za-z0-9:_-]*$')
     url_origem: str = Field(default='', max_length=2048)
+    # Jornada em andamento: sem data de término enquanto marcado. Progresso não muda por causa disto.
+    ainda_jogando: bool = False
+    # Origem do total de troféus quando veio de uma fonte (ex.: 'steam', 'jogo base', data da consulta); vazio se manual.
+    trofeus_fonte: str = Field(default='', max_length=40)
+    trofeus_escopo: str = Field(default='', max_length=40)
+    trofeus_consultado_em: str | None = Field(default=None, max_length=40)
 
     @field_validator('nome', 'plataforma')
     @classmethod
@@ -132,11 +138,33 @@ class GameInput(Model):
 
     @model_validator(mode='after')
     def consistency(self):
+        if self.ainda_jogando:
+            self.data_termino = None
         if self.trofeus_obtidos > self.trofeus_total:
             raise ValueError('Obtidos não pode superar o total de troféus.')
         if self.data_inicio and self.data_termino and self.data_termino < self.data_inicio:
             raise ValueError('Término anterior ao início.')
         return self
+
+
+class OrderInput(Model):
+    """Ordem manual da biblioteca: ids do próprio perfil, na sequência desejada."""
+    ids: list[int] = Field(min_length=1, max_length=2000)
+
+
+class AvatarSlot(Model):
+    imagem_id: str = Field(pattern=r'^[a-f0-9]{64}$')
+
+
+THEMES, MOTIONS, DENSITIES, ACCENTS = ('escuro', 'claro'), ('padrao', 'reduzida', 'desligada'), ('confortavel', 'compacta'), ('roxo', 'magenta', 'verde', 'azul')
+
+
+class PreferencesInput(Model):
+    """Preferências visuais por perfil; só valores aprovados do Design System, nunca CSS livre."""
+    tema: Literal['escuro', 'claro'] = 'escuro'
+    movimento: Literal['padrao', 'reduzida', 'desligada'] = 'padrao'
+    densidade: Literal['confortavel', 'compacta'] = 'confortavel'
+    destaque: Literal['roxo', 'magenta', 'verde', 'azul'] = 'roxo'
 
 
 class Crop(Model):

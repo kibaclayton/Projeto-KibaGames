@@ -6,7 +6,8 @@ export function trophies(earned: number, total: number) {
 
 export const blankGame: GameInput = { nome: '', plataforma: 'PC', progresso: 0, capa_id: null, favorito: false, colecao_id: null, grupo: '', ordem: 1, data_inicio: null, data_termino: null,
   trofeus_obtidos: 0, trofeus_total: 0, status_avancado: '', notas: '', cronograma: {}, genero: '', minutos_jogados: 0,
-  data_lancamento: null, desenvolvedor: '', publicadora: '', descricao: '', fonte_externa: '', id_externo: '', url_origem: '' };
+  data_lancamento: null, desenvolvedor: '', publicadora: '', descricao: '', fonte_externa: '', id_externo: '', url_origem: '',
+  ainda_jogando: false, trofeus_fonte: '', trofeus_escopo: '', trofeus_consultado_em: null };
 
 export function gamePayload(input: Partial<Omit<GameInput, 'data_inicio' | 'data_termino' | 'data_lancamento'>> & { data_inicio?: string | null; data_termino?: string | null; data_lancamento?: string | null }): GameInput {
   const result: GameInput = { ...blankGame, ...input, nome: input.nome?.trim() ?? '', data_inicio: input.data_inicio || null, data_termino: input.data_termino || null, data_lancamento: input.data_lancamento || null };

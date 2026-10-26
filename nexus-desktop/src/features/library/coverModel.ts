@@ -36,10 +36,15 @@ export function rankCandidates(query: string, items: CoverCandidate[]): CoverCan
   return items.map((item, index) => ({ item, index, score: score(item) })).sort((a, b) => b.score - a.score || a.index - b.index).map(entry => entry.item);
 }
 
-export type FillField = 'nome' | 'plataforma' | 'genero' | 'data_lancamento' | 'desenvolvedor' | 'publicadora' | 'descricao';
-export const FILL_LABELS: Record<FillField, string> = { nome: 'Nome do jogo', plataforma: 'Plataforma', genero: 'Gênero', data_lancamento: 'Lançamento', desenvolvedor: 'Desenvolvedor', publicadora: 'Publicadora', descricao: 'Descrição' };
+export type FillField = 'nome' | 'plataforma' | 'genero' | 'data_lancamento' | 'desenvolvedor' | 'publicadora' | 'descricao' | 'trofeus_total';
+export const FILL_LABELS: Record<FillField, string> = { nome: 'Nome do jogo', plataforma: 'Plataforma', genero: 'Gênero', data_lancamento: 'Lançamento', desenvolvedor: 'Desenvolvedor', publicadora: 'Publicadora', descricao: 'Descrição', trofeus_total: 'Total de troféus' };
 export interface FillChange { field: FillField; label: string; current: string; next: string }
-export interface FillResult { form: GameInput; filled: FillField[]; conflicts: FillChange[]; platformChoices: string[] }
+export interface FillResult { form: GameInput; filled: FillField[]; conflicts: FillChange[]; platformChoices: string[]; trophyNote: string }
+
+/** Campos de origem do total de troféus que acompanham um total vindo da fonte. */
+export function trophyMeta(details: Pick<ExternalDetails, 'trofeus_fonte' | 'trofeus_escopo' | 'trofeus_consultado_em'>) {
+  return { trofeus_fonte: details.trofeus_fonte, trofeus_escopo: details.trofeus_escopo, trofeus_consultado_em: details.trofeus_consultado_em };
+}
 
 const same = (field: FillField, a: string, b: string) => field === 'nome' ? normalizeTitle(a) === normalizeTitle(b) : a.trim().toLowerCase() === b.trim().toLowerCase();
 
@@ -70,15 +75,25 @@ export function mergeDetails(form: GameInput, details: ExternalDetails, options:
     if (!value) continue;
     const current = (form[field] ?? '') as string;
     const treatAsEmpty = current.trim() === '' || (options.isNew && (field === 'nome' || (field === 'plataforma' && !options.touched.has('plataforma'))));
-    if (treatAsEmpty) { (next as Record<FillField, string | null>)[field] = value; filled.push(field); }
+    if (treatAsEmpty) { (next as unknown as Record<string, string | null>)[field] = value; filled.push(field); }
     else if (!same(field, current, value)) conflicts.push({ field, label: FILL_LABELS[field], current, next: value });
   }
-  return { form: next, filled, conflicts, platformChoices };
+  // Total de troféus da edição consultada: entra quando não há total; difere → confirmação; menor que os obtidos → mantido e explicado.
+  let trophyNote = '';
+  const total = details.trofeus_total;
+  if (typeof total === 'number' && total > 0) {
+    if (total < form.trofeus_obtidos) trophyNote = `A fonte informa ${total} troféus, menos que os ${form.trofeus_obtidos} que você já obteve; o total atual foi mantido.`;
+    else if (!form.trofeus_total) { Object.assign(next, { trofeus_total: total }, trophyMeta(details)); filled.push('trofeus_total'); }
+    else if (form.trofeus_total !== total) conflicts.push({ field: 'trofeus_total', label: FILL_LABELS.trofeus_total, current: String(form.trofeus_total), next: String(total) });
+  }
+  return { form: next, filled, conflicts, platformChoices, trophyNote };
 }
 
-/** Aplica as substituições que a pessoa confirmou. */
-export function applyChanges(form: GameInput, changes: FillChange[]): GameInput {
-  return changes.reduce((current, change) => ({ ...current, [change.field]: change.next }), form);
+/** Aplica as substituições que a pessoa confirmou; um total de troféus confirmado leva junto a fonte e a data da consulta. */
+export function applyChanges(form: GameInput, changes: FillChange[], details?: ExternalDetails): GameInput {
+  return changes.reduce((current, change) => change.field === 'trofeus_total'
+    ? { ...current, trofeus_total: Number(change.next), ...(details ? trophyMeta(details) : {}) }
+    : { ...current, [change.field]: change.next }, form);
 }
 
 /** Texto curto e anunciável sobre o que foi preenchido e de onde veio. */

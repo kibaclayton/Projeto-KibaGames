@@ -25,22 +25,30 @@ export interface Game {
   genero: string; minutos_jogados: number; atualizado: string;
   // Ficha vinda de uma fonte externa (opcional, editável); nunca inclui dados da jornada pessoal.
   data_lancamento: string | null; desenvolvedor: string; publicadora: string; fonte_externa: '' | CoverSource; id_externo: string;
+  // Jornada em andamento (sem término), posição na ordem manual da biblioteca e origem do total de troféus.
+  ainda_jogando: boolean; posicao: number | null; trofeus_fonte: string;
 }
-export interface GameDetails extends Game { grupo: string; notas: string; cronograma: Record<string, 'single' | 'range'>; descricao: string; url_origem: string }
-export type GameInput = Omit<GameDetails, 'id' | 'atualizado' | 'trofeus_percentual' | 'platinado'>;
+export interface GameDetails extends Game { grupo: string; notas: string; cronograma: Record<string, 'single' | 'range'>; descricao: string; url_origem: string; trofeus_escopo: string; trofeus_consultado_em: string | null }
+export type GameInput = Omit<GameDetails, 'id' | 'atualizado' | 'trofeus_percentual' | 'platinado' | 'posicao'>;
+export type GameSort = 'minha' | 'nome' | 'recentes' | 'progresso' | 'colecao';
+export type PlatformFamily = 'todas' | 'pc' | 'playstation' | 'xbox' | 'nintendo';
+export interface AvatarSlot { posicao: number; imagem_id: string | null; ativo: boolean }
+export interface CommonsImage { titulo: string; previa: string; imagem: string; origem: string; licenca: string; autor: string }
+export interface Preferences { tema: 'escuro' | 'claro'; movimento: 'padrao' | 'reduzida' | 'desligada'; densidade: 'confortavel' | 'compacta'; destaque: 'roxo' | 'magenta' | 'verde' | 'azul' }
 export interface Collection { id: number; nome: string; capa_id: string | null; total: number; mosaico: string[] }
 export interface ImageResult { id: string; tipo: string; largura: number; altura: number; bytes: number; miniatura_bytes: number }
 export interface BackupInfo { nome: string; bytes: number; modificado: string; valido: boolean; erro: string; manifesto: { aplicativo: string; esquema: number; criado: string; motivo: string; contagens: Record<string, number>; imagens_arquivos: number } | null }
 export interface IntegrityReport { ok: boolean; integridade: string[]; chaves_estrangeiras: unknown[]; contagens: Record<string, number>; esquema: number }
 export interface OrphanReport { registros: number; arquivos_sem_registro: number; bytes: number }
-export type CoverSource = 'steam' | 'wikipedia';
+export type CoverSource = 'steam' | 'wikipedia' | 'igdb';
 /** Resultado resumido da busca: `fonte + id` é a identidade estável usada para pedir a ficha completa ao serviço. */
 export interface CoverCandidate { fonte: CoverSource; id: string; titulo: string; imagem: string; previa: string; origem: string; ano: number | null; plataformas: string[] }
-export interface CoverSearch { itens: CoverCandidate[]; avisos: string[] }
-/** Ficha tipada do jogo escolhido, já normalizada pelo serviço (plataformas do Nexus, gênero sugerido). */
+export interface CoverSearch { itens: CoverCandidate[]; avisos: string[]; igdb_configurada?: boolean }
+/** Ficha tipada do jogo escolhido, já normalizada pelo serviço (plataformas do Nexus, gênero sugerido, total de troféus quando a fonte publica). */
 export interface ExternalDetails {
   fonte: CoverSource; id: string; titulo: string; imagem: string | null; origem: string; data_lancamento: string | null; ano: number | null;
   plataformas: string[]; plataformas_nexus: string[]; generos: string[]; genero: string; desenvolvedores: string[]; publicadoras: string[]; descricao: string; atribuicao: string;
+  trofeus_total: number | null; trofeus_fonte: string; trofeus_escopo: string; trofeus_consultado_em: string | null;
 }
 export interface DuplicateRef { id: number; nome: string; plataforma: string }
 export interface ApplyResult { detalhes: ExternalDetails; imagem: ImageResult | null; erro_capa: string; duplicado_em: DuplicateRef | null }
@@ -92,7 +100,7 @@ export class NexusApi {
   forgetDevices() { return this.json<void>('/conta/aparelhos', { method: 'DELETE' }); }
   logout() { return this.json<void>('/sessao', { method: 'DELETE' }); }
   summary(signal?: AbortSignal) { return this.json<Summary>('/resumo', { signal }); }
-  games(params: { busca?: string; genero?: string; favorito?: boolean; colecao_id?: number; pagina?: number; limite?: number } = {}, signal?: AbortSignal) {
+  games(params: { busca?: string; genero?: string; favorito?: boolean; colecao_id?: number; pagina?: number; limite?: number; ordenacao?: GameSort } = {}, signal?: AbortSignal) {
     const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)]));
     return this.json<{ itens: Game[]; total: number; pagina: number; limite: number }>(`/jogos?${query}`, { signal });
   }
@@ -123,9 +131,18 @@ export class NexusApi {
   integrity(signal?: AbortSignal) { return this.json<IntegrityReport>('/manutencao/integridade', { signal }); }
   orphans(signal?: AbortSignal) { return this.json<OrphanReport>('/manutencao/orfas', { signal }); }
   cleanOrphans() { return this.json<{ registros_removidos: number; arquivos_removidos: number; bytes_liberados: number; backup_seguranca: string }>('/manutencao/orfas/limpar', { method: 'POST' }); }
-  searchCovers(nome: string, fonte: CoverSource | 'todas' = 'todas', signal?: AbortSignal) {
-    return this.json<CoverSearch>(`/capas/busca?${new URLSearchParams({ nome, fonte })}`, { signal });
+  searchCovers(nome: string, fonte: CoverSource | 'todas' = 'todas', signal?: AbortSignal, plataforma: PlatformFamily = 'todas') {
+    return this.json<CoverSearch>(`/capas/busca?${new URLSearchParams({ nome, fonte, plataforma })}`, { signal });
   }
+  coverSources(signal?: AbortSignal) { return this.json<{ igdb_configurada: boolean; arquivo_igdb: string }>('/capas/fontes', { signal }); }
+  /** Ordem manual da biblioteca: os ids informados vão para o início, na sequência dada; atômico no serviço. */
+  reorderGames(ids: number[]) { return this.json<{ total: number }>('/jogos/ordem', { method: 'PUT', body: JSON.stringify({ ids }) }); }
+  avatarGallery(signal?: AbortSignal) { return this.json<AvatarSlot[]>('/conta/avatares', { signal }); }
+  setAvatarSlot(posicao: number, imagem_id: string) { return this.json<AvatarSlot[]>(`/conta/avatares/${posicao}`, { method: 'PUT', body: JSON.stringify({ imagem_id }) }); }
+  removeAvatarSlot(posicao: number) { return this.json<AvatarSlot[]>(`/conta/avatares/${posicao}`, { method: 'DELETE' }); }
+  searchAvatars(termo: string, signal?: AbortSignal) { return this.json<{ itens: CommonsImage[] }>(`/avatares/busca?${new URLSearchParams({ termo })}`, { signal }); }
+  preferences(signal?: AbortSignal) { return this.json<Preferences>('/conta/preferencias', { signal }); }
+  savePreferences(preferences: Preferences) { return this.json<Preferences>('/conta/preferencias', { method: 'PUT', body: JSON.stringify(preferences) }); }
   /** Escolha de um resultado: ficha e capa do mesmo identificador; nada é gravado no jogo até "Salvar jogo". */
   applyCandidate(fonte: CoverSource, id: string, jogo_id: number | null = null, signal?: AbortSignal) {
     return this.json<ApplyResult>('/capas/aplicar', { method: 'POST', body: JSON.stringify(jogo_id ? { fonte, id, jogo_id } : { fonte, id }), signal });

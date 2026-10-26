@@ -66,7 +66,7 @@ def cleanup_leftovers(db: Database):
 
 
 def _counts(conn) -> dict:
-    return {table: conn.execute(f'SELECT count(*) FROM {table}').fetchone()[0] for table in ('usuarios', 'jogos', 'colecoes', 'imagens')}
+    return {table: conn.execute(f'SELECT count(*) FROM {table}').fetchone()[0] for table in ('usuarios', 'jogos', 'colecoes', 'imagens', 'avatares')}
 
 
 def create_backup(db: Database, reason: str = 'manual') -> dict:
@@ -225,6 +225,7 @@ ORPHAN_SQL = """
 SELECT id, bytes FROM imagens WHERE id NOT IN (SELECT capa_id FROM jogos WHERE capa_id IS NOT NULL)
  AND id NOT IN (SELECT avatar_id FROM usuarios WHERE avatar_id IS NOT NULL)
  AND id NOT IN (SELECT capa_id FROM colecoes WHERE capa_id IS NOT NULL)
+ AND id NOT IN (SELECT imagem_id FROM avatares)
 """
 
 

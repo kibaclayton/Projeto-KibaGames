@@ -18,6 +18,9 @@ import threading
 import time
 from urllib.parse import quote, urlencode, urlsplit
 
+from datetime import datetime, timezone
+
+from . import igdb
 from .images import IMAGE_TYPES, MAX_BYTES, fetch
 from .platforms import nexus_platforms, suggest_genre
 
@@ -38,7 +41,19 @@ STEAM_IMAGE_BASE = 'https://shared.steamstatic.com/store_item_assets/steam/apps'
 WIKIPEDIA_HOSTS = {'pt.wikipedia.org', 'en.wikipedia.org'}
 WIKIDATA_HOSTS = {'www.wikidata.org'}
 WIKIPEDIA_IMAGE_HOSTS = {'upload.wikimedia.org'}
-IMAGE_HOSTS = {'steam': STEAM_IMAGE_HOSTS, 'wikipedia': WIKIPEDIA_IMAGE_HOSTS}
+IMAGE_HOSTS = {'steam': STEAM_IMAGE_HOSTS, 'wikipedia': WIKIPEDIA_IMAGE_HOSTS, 'igdb': igdb.IMAGE_HOSTS}
+# Famílias de plataforma para o filtro da busca; nomes vindos das fontes são comparados por estas expressões.
+FAMILY_PATTERNS = {
+    'pc': re.compile(r'windows|\bpc\b|mac|linux|steam', re.I), 'playstation': re.compile(r'playstation|\bps[1-5p]\b|vita', re.I),
+    'xbox': re.compile(r'xbox', re.I), 'nintendo': re.compile(r'nintendo|switch|\bwii|game ?boy|\b3?ds\b|gamecube|n64|\bs?nes\b', re.I),
+}
+
+
+def matches_family(platforms: list[str], family: str) -> bool:
+    """Um candidato só entra num filtro de família quando alguma plataforma conhecida dele casa; sem plataformas, fica de fora."""
+    if family not in FAMILY_PATTERNS:
+        return True
+    return any(FAMILY_PATTERNS[family].search(name) for name in platforms)
 # A loja marca trilhas sonoras, artbooks e upgrades como "app"; estes termos no nome indicam que não é o jogo em si.
 NOT_A_GAME = ('soundtrack', 'trilha sonora', 'artbook', 'art book', 'upgrade', 'season pass', 'passe de temporada', 'dlc', 'demo',
               'pacote de', 'bundle', 'expansion pass', 'expansão', 'skin pack', 'wallpaper', 'conteúdo adicional', 'roupa de', 'costume',
@@ -73,7 +88,7 @@ def _image_allowed(url: str, hosts: set[str]) -> bool:
 
 def fetch_preview(url: str) -> tuple[str, bytes]:
     """Prévia de um candidato, buscada pelo serviço: a interface nunca fala direto com os CDNs das fontes."""
-    hosts = STEAM_IMAGE_HOSTS | WIKIPEDIA_IMAGE_HOSTS
+    hosts = STEAM_IMAGE_HOSTS | WIKIPEDIA_IMAGE_HOSTS | igdb.IMAGE_HOSTS
     if not _image_allowed(url, hosts):
         raise ValueError('Prévia fora das fontes permitidas.')
     return fetch(url, 'image/png,image/jpeg,image/webp', IMAGE_TYPES, MAX_PREVIEW_BYTES, hosts, 10)
@@ -139,7 +154,11 @@ def _details(source: str, external_id: str, title: str, image: str | None, origi
             'plataformas': platforms, 'plataformas_nexus': nexus_platforms(platforms),
             'generos': genres, 'genero': suggest_genre(genres),
             'desenvolvedores': extra.get('desenvolvedores', [])[:8], 'publicadoras': extra.get('publicadoras', [])[:8],
-            'descricao': extra.get('descricao', ''), 'atribuicao': SOURCE_ATTRIBUTION[source], 'parcial': bool(extra.get('parcial', False))}
+            'descricao': extra.get('descricao', ''), 'atribuicao': SOURCE_ATTRIBUTION[source], 'parcial': bool(extra.get('parcial', False)),
+            # Total de troféus/conquistas da edição consultada, quando a fonte o publica; zero ou ausência viram "não informado" (None).
+            'trofeus_total': extra.get('trofeus_total'), 'trofeus_fonte': source if extra.get('trofeus_total') else '',
+            'trofeus_escopo': 'jogo base' if extra.get('trofeus_total') else '',
+            'trofeus_consultado_em': datetime.now(timezone.utc).isoformat(timespec='seconds') if extra.get('trofeus_total') else None}
 
 
 # --- Steam -----------------------------------------------------------------------------------------------------------
@@ -172,7 +191,7 @@ def steam_details(app_id: str, fetch_json=fetch_json) -> dict:
     if not re.fullmatch(r'[0-9]{1,10}', app_id):
         raise ValueError('Identificador inválido para a Steam.')
     url = 'https://store.steampowered.com/api/appdetails?' + urlencode({'appids': app_id, 'l': 'portuguese', 'cc': 'BR',
-                                                                        'filters': 'basic,genres,release_date,developers,publishers,platforms'})
+                                                                        'filters': 'basic,genres,release_date,developers,publishers,platforms,achievements'})
     entry = fetch_json(url, STEAM_HOSTS).get(app_id)
     data = entry.get('data') if isinstance(entry, dict) and entry.get('success') else None
     if not isinstance(data, dict) or not isinstance(data.get('name'), str):
@@ -181,10 +200,13 @@ def steam_details(app_id: str, fetch_json=fetch_json) -> dict:
     date, year = parse_steam_date(release.get('date', '')) if not release.get('coming_soon') else (None, None)
     flags = data.get('platforms') if isinstance(data.get('platforms'), dict) else {}
     genres = [genre.get('description') for genre in data.get('genres', []) if isinstance(genre, dict)] if isinstance(data.get('genres'), list) else []
+    achievements = data.get('achievements') if isinstance(data.get('achievements'), dict) else {}
+    total = achievements.get('total')
+    trophies = total if type(total) is int and 0 < total <= 100000 else None  # Steam só conta conquistas do jogo base; zero = não informado.
     return _details('steam', app_id, _text(data['name'], 150), steam_image(app_id), f'https://store.steampowered.com/app/{app_id}/',
                     data_lancamento=date, ano=year, plataformas=[label for key, label in STEAM_PLATFORM_LABELS.items() if flags.get(key)],
                     generos=_strings(genres), desenvolvedores=_strings(data.get('developers')), publicadoras=_strings(data.get('publishers')),
-                    descricao=_text(data.get('short_description'), MAX_DESCRIPTION))
+                    descricao=_text(data.get('short_description'), MAX_DESCRIPTION), trofeus_total=trophies)
 
 
 # --- Wikipedia + Wikidata ----------------------------------------------------------------------------------------------
@@ -356,10 +378,12 @@ def _wikipedia_summary(language: str, selector: dict, fetch_json) -> tuple[str |
 
 # --- Provedores, cache e limites ---------------------------------------------------------------------------------------
 
-SOURCES = {'steam': search_steam, 'wikipedia': search_wikipedia}
+SOURCES = {'steam': search_steam, 'wikipedia': search_wikipedia, 'igdb': None}  # IGDB é resolvida em search_covers, porque depende de chave local.
 DETAILS = {'steam': steam_details, 'wikipedia': wikipedia_details}
-SOURCE_LABELS = {'steam': 'Steam', 'wikipedia': 'Wikipedia'}
-SOURCE_ATTRIBUTION = {'steam': 'Dados e capa da loja Steam (Valve).', 'wikipedia': 'Dados do Wikidata (CC0) e resumo/imagem da Wikipedia (CC BY-SA).'}
+SOURCE_LABELS = {'steam': 'Steam', 'wikipedia': 'Wikipedia', 'igdb': 'IGDB'}
+SOURCE_ATTRIBUTION = {'steam': 'Dados e capa da loja Steam (Valve).', 'wikipedia': 'Dados do Wikidata (CC0) e resumo/imagem da Wikipedia (CC BY-SA).',
+                      'igdb': 'Dados e capas da IGDB (Twitch), uso não comercial.'}
+IGDB_HINT = 'IGDB não configurada: consoles dependem da Wikipedia/Wikidata. Para ativar, crie igdb.json na pasta de dados (veja a documentação).'
 
 
 class Cache:
@@ -407,18 +431,34 @@ class Throttle:
             return True
 
 
-def search_covers(name: str, sources: tuple[str, ...] = ('steam', 'wikipedia'), fetch_json=fetch_json, cache: Cache | None = None) -> dict:
-    """Consulta as fontes pedidas; uma fonte fora do ar vira aviso, sem derrubar as outras. Resultados completos ficam em cache."""
-    key = json.dumps(['busca', list(sources), ' '.join(name.casefold().split())])
+def search_covers(name: str, sources: tuple[str, ...] = ('steam', 'wikipedia'), fetch_json=fetch_json, cache: Cache | None = None,
+                  family: str = 'todas', igdb_config: dict | None = None) -> dict:
+    """Consulta as fontes pedidas; uma fonte fora do ar vira aviso, sem derrubar as outras. Resultados completos ficam em cache.
+
+    `family` filtra por PC/PlayStation/Xbox/Nintendo: a Steam só responde para PC, a Wikipedia/Wikidata é filtrada pelas
+    plataformas do item e a IGDB (quando configurada) recebe o filtro na própria consulta.
+    """
+    key = json.dumps(['busca', list(sources), ' '.join(name.casefold().split()), family, bool(igdb_config)])
     if cache is not None and (cached := cache.get(key)) is not None:
         return cached
     items, warnings = [], []
     for source in sources:
+        if source == 'igdb':
+            if not igdb_config:
+                if family in ('playstation', 'xbox', 'nintendo') or sources == ('igdb',):
+                    warnings.append(IGDB_HINT)
+                continue
+            try:
+                items.extend(igdb.search(igdb_config, name, family))
+            except (ValueError, OSError, http.client.HTTPException) as exc:
+                warnings.append(f'IGDB indisponível no momento ({exc}).')
+            continue
         search = SOURCES.get(source)
-        if not search:
+        if not search or (source == 'steam' and family not in ('todas', 'pc')):
             continue
         try:
-            items.extend(search(name, fetch_json))
+            found = search(name, fetch_json)
+            items.extend(item for item in found if source != 'wikipedia' or matches_family(item.get('plataformas', []), family))
         except PartialResult as partial:
             items.extend(partial.items)
             warnings.append(partial.warning)
@@ -430,14 +470,24 @@ def search_covers(name: str, sources: tuple[str, ...] = ('steam', 'wikipedia'), 
     return result
 
 
-def game_details(source: str, external_id: str, fetch_json=fetch_json, cache: Cache | None = None) -> dict:
+def game_details(source: str, external_id: str, fetch_json=fetch_json, cache: Cache | None = None, igdb_config: dict | None = None) -> dict:
     """Ficha completa pelo identificador do provedor; só os campos tipados de `_details` saem daqui."""
-    provider = DETAILS.get(source)
-    if not provider:
-        raise ValueError('Fonte desconhecida.')
     key = json.dumps(['detalhes', source, external_id])
     if cache is not None and (cached := cache.get(key)) is not None:
         return cached
+    if source == 'igdb':
+        if not igdb_config:
+            raise ValueError('IGDB não configurada neste computador.')
+        raw = igdb.details(igdb_config, external_id)
+        result = _details('igdb', external_id, raw['titulo'], raw['imagem'], raw['origem'], data_lancamento=raw['data_lancamento'], ano=raw['ano'],
+                          plataformas=raw['plataformas'], generos=raw['generos'], desenvolvedores=raw['desenvolvedores'], publicadoras=raw['publicadoras'],
+                          descricao=_text(raw['descricao'], MAX_DESCRIPTION))
+        if cache is not None:
+            cache.set(key, result)
+        return result
+    provider = DETAILS.get(source)
+    if not provider:
+        raise ValueError('Fonte desconhecida.')
     result = provider(external_id, fetch_json)
     if cache is not None and not result.get('parcial'):
         cache.set(key, result)

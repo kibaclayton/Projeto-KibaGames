@@ -66,6 +66,24 @@ test('editing an existing game fills only empty fields and turns differences int
   assert.deepEqual(equal.conflicts, [], 'same values in another case are neither filled nor conflicts');
 });
 
+test('a trophy total from the source fills an empty total, asks before replacing, and never goes below what was earned', () => {
+  const filled = covers.mergeDetails(game({ trofeus_total: 0, trofeus_obtidos: 0 }), details({ trofeus_total: 49, trofeus_fonte: 'steam', trofeus_escopo: 'jogo base', trofeus_consultado_em: '2026-10-25T10:00:00+00:00' }), { isNew: true, touched: new Set() });
+  assert.equal(filled.form.trofeus_total, 49);
+  assert.equal(filled.form.trofeus_fonte, 'steam');
+  assert.ok(filled.filled.includes('trofeus_total'));
+  const differs = covers.mergeDetails(game({ trofeus_total: 40, trofeus_obtidos: 2 }), details({ trofeus_total: 49, trofeus_fonte: 'steam', trofeus_escopo: 'jogo base', trofeus_consultado_em: 'x' }), { isNew: false, touched: new Set() });
+  const trophyConflicts = differs.conflicts.filter(c => c.field === 'trofeus_total');
+  assert.deepEqual(trophyConflicts.map(c => [c.field, c.current, c.next]), [['trofeus_total', '40', '49']]);
+  const applied = covers.applyChanges(differs.form, trophyConflicts, details({ trofeus_total: 49, trofeus_fonte: 'steam', trofeus_escopo: 'jogo base', trofeus_consultado_em: 'x' }));
+  assert.equal(applied.trofeus_total, 49);
+  assert.equal(applied.trofeus_escopo, 'jogo base');
+  const lower = covers.mergeDetails(game({ trofeus_total: 60, trofeus_obtidos: 55 }), details({ trofeus_total: 49, trofeus_fonte: 'steam', trofeus_escopo: 'jogo base', trofeus_consultado_em: 'x' }), { isNew: false, touched: new Set() });
+  assert.equal(lower.form.trofeus_total, 60, 'a total below the earned count is never applied');
+  assert.match(lower.trophyNote, /mantido/);
+  const none = covers.mergeDetails(game(), details({ trofeus_total: null, trofeus_fonte: '', trofeus_escopo: '', trofeus_consultado_em: null }), { isNew: true, touched: new Set() });
+  assert.equal(none.form.trofeus_total, 10, 'no source total means the manual value stays');
+});
+
 test('several possible platforms preserve the current choice or become a quick choice, never an arbitrary pick', () => {
   const kept = covers.mergeDetails(game({ plataforma: 'PS5' }), details({ plataformas_nexus: ['PC', 'PS5', 'Xbox'] }), { isNew: false, touched: new Set() });
   assert.equal(kept.form.plataforma, 'PS5');

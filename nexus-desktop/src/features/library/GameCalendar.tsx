@@ -1,17 +1,17 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { ChevronLeft, ChevronRight, Eraser } from 'lucide-react';
 import { Button } from '../../components/ui';
-import { APPEARANCE_LABELS, WEEKDAYS, WEEKDAY_NAMES, addDays, appearance, bounds, dayLabel, daysInMonth, markInterval, monthGrid, monthLabel, monthOf, shiftMonth, todayIso, toggleDay, toggleWeekday, type Schedule } from './schedule';
+import { APPEARANCE_LABELS, WEEKDAYS, WEEKDAY_NAMES, addDays, appearance, bounds, dayLabel, daysInMonth, markInterval, monthGrid, monthLabel, monthOf, shiftMonth, todayIso, toggleDay, toggleWeekday, type Journey, type Schedule } from './schedule';
 
 const pad = (value: number) => String(value).padStart(2, '0');
 const MOVES: Record<string, number> = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
 
 /** Calendário de sessões: clique marca um dia, arraste cria sequência, cabeçalho marca o dia da semana no mês. */
-export function GameCalendar({ schedule, onChange, jump }: { schedule: Schedule; onChange: (next: Schedule) => void; jump?: { iso: string | null; key: number } }) {
+export function GameCalendar({ schedule, onChange, jump, journey }: { schedule: Schedule; onChange: (next: Schedule) => void; jump?: { iso: string | null; key: number }; journey?: Journey }) {
   const hintId = useId();
   const today = useMemo(todayIso, []);
-  const [view, setView] = useState(() => monthOf(bounds(schedule).start ?? today));
-  const [focused, setFocused] = useState(bounds(schedule).start ?? today);
+  const [view, setView] = useState(() => monthOf(bounds(schedule).start ?? journey?.start ?? today));
+  const [focused, setFocused] = useState(bounds(schedule).start ?? journey?.start ?? today);
   const [preview, setPreview] = useState<Schedule | null>(null);
   const [pendingFocus, setPendingFocus] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
@@ -103,7 +103,7 @@ export function GameCalendar({ schedule, onChange, jump }: { schedule: Schedule;
       {weeks.map((week, row) => <div role="row" className="calendar-row" key={row}>
         {week.map((day, column) => {
           if (!day) return <div role="gridcell" key={column} className="calendar-empty" />;
-          const value = iso(day), state = appearance(shown, value, today);
+          const value = iso(day), state = appearance(shown, value, today, journey);
           return <div role="gridcell" key={column}>
             <button type="button" className={`calendar-day ${value === today ? 'is-today' : ''}`} data-day={value} data-state={state} aria-label={`${dayLabel(value)}, ${APPEARANCE_LABELS[state]}`} aria-pressed={state !== 'empty'} tabIndex={value === tabStop ? 0 : -1}
               onPointerDown={event => pointerDown(event, value)} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={() => { drag.current = null; setPreview(null); }} onClick={() => click(value)} onFocus={() => setFocused(value)}>{day}</button>
@@ -113,9 +113,9 @@ export function GameCalendar({ schedule, onChange, jump }: { schedule: Schedule;
     </div>
     {notice && <p role="alert" className="form-error">{notice}</p>}
     <div className="calendar-legend" aria-hidden="true">
-      <span><i data-state="edge" /> Início / fim de sequência</span><span><i data-state="middle" /> Entre datas</span><span><i data-state="single" /> Dia avulso</span><span><i data-state="future" /> Agendado / futuro</span>
+      <span><i data-state="single" /> Dia em que joguei</span><span><i data-state="edge" /> Início / fim de sequência</span><span><i data-state="middle" /> Entre datas</span><span><i data-state="journey" /> Jornada (sem sessão)</span><span><i data-state="future" /> Agendado / futuro</span>
     </div>
-    <p id={hintId} className="calendar-hint">Clique marca um dia avulso; arraste cria uma sequência; Sáb e Dom no cabeçalho marcam os fins de semana do mês. Pelo teclado: setas movem o foco, Enter marca e Shift+Enter cria uma sequência desde o último dia marcado.</p>
+    <p id={hintId} className="calendar-hint">Clique marca um dia em que você jogou (conta em "dias em que joguei"); arraste cria uma sequência de planejamento; Sáb e Dom no cabeçalho marcam os fins de semana do mês. Dias futuros não contam como jogados. Pelo teclado: setas movem o foco, Enter marca e Shift+Enter cria uma sequência desde o último dia marcado.</p>
     <div className="calendar-actions"><Button disabled={!Object.keys(schedule).length} onClick={() => commit(() => ({}))}><Eraser size={15} /> Limpar seleção</Button></div>
   </div>;
 }

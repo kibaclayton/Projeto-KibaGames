@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from .database import normalize
 from .models import GameInput
 
-SUMMARY_COLUMNS = 'id,nome,plataforma,progresso,capa_id,data_inicio,data_termino,ordem,favorito,colecao_id,trofeus_obtidos,trofeus_total,status_avancado,genero,minutos_jogados,data_lancamento,desenvolvedor,publicadora,fonte_externa,id_externo,atualizado'
+SUMMARY_COLUMNS = 'id,nome,plataforma,progresso,capa_id,data_inicio,data_termino,ordem,favorito,colecao_id,trofeus_obtidos,trofeus_total,status_avancado,genero,minutos_jogados,data_lancamento,desenvolvedor,publicadora,fonte_externa,id_externo,ainda_jogando,posicao,trofeus_fonte,atualizado'
 
 
 def owned(conn, table, row_id, user_id):
@@ -28,6 +28,8 @@ def game_result(row):
     data.pop('usuario_id', None)
     data.pop('nome_chave', None)
     data['favorito'] = bool(data['favorito'])
+    if 'ainda_jogando' in data:
+        data['ainda_jogando'] = bool(data['ainda_jogando'])
     total, earned = data['trofeus_total'], data['trofeus_obtidos']
     data['trofeus_percentual'] = round(earned * 100 / total, 2) if total else 0
     data['platinado'] = total > 0 and earned == total
@@ -50,12 +52,28 @@ def save_game(conn, model: GameInput, user_id: int, game_id: int | None = None):
     values = game_values(model)
     if game_id is None:
         values['usuario_id'] = user_id
+        # Jogo novo entra no fim da ordem manual do perfil.
+        values['posicao'] = (conn.execute('SELECT coalesce(max(posicao),0) FROM jogos WHERE usuario_id=?', (user_id,)).fetchone()[0] or 0) + 1
         cursor = conn.execute(f"INSERT INTO jogos({','.join(values)}) VALUES({','.join('?' for _ in values)})", tuple(values.values()))
         game_id = cursor.lastrowid
     else:
         owned(conn, 'jogos', game_id, user_id)
         conn.execute(f"UPDATE jogos SET {','.join(key + '=?' for key in values)}, atualizado=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND usuario_id=?", (*values.values(), game_id, user_id))
     return game_result(owned(conn, 'jogos', game_id, user_id))
+
+
+def reorder_games(conn, user_id: int, ids: list[int]) -> int:
+    """Ordem manual atômica: os ids informados recebem as posições 1..n; os demais jogos seguem depois, na ordem atual."""
+    if len(set(ids)) != len(ids):
+        raise HTTPException(422, 'Jogo repetido na ordem.')
+    conn.execute('BEGIN IMMEDIATE')
+    owned_ids = [row['id'] for row in conn.execute('SELECT id FROM jogos WHERE usuario_id=? ORDER BY posicao,id', (user_id,))]
+    unknown = set(ids) - set(owned_ids)
+    if unknown:
+        raise HTTPException(404, 'Jogo não encontrado.')
+    sequence = ids + [game for game in owned_ids if game not in set(ids)]
+    conn.executemany('UPDATE jogos SET posicao=? WHERE id=? AND usuario_id=?', [(index + 1, game, user_id) for index, game in enumerate(sequence)])
+    return len(sequence)
 
 
 def find_duplicate(conn, user_id: int, source: str, external_id: str, exclude_game: int | None = None):

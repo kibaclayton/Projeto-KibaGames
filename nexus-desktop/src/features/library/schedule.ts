@@ -1,7 +1,9 @@
 /** Cronograma de sessões: modelo puro portado de calendario.py (legado). Datas ISO locais, sem fuso. */
 export type DayKind = 'single' | 'range';
 export type Schedule = Record<string, DayKind>;
-export type DayAppearance = 'empty' | 'single' | 'edge' | 'middle' | 'future';
+export type DayAppearance = 'empty' | 'single' | 'edge' | 'middle' | 'future' | 'journey';
+/** Intervalo da jornada (início até término, ou até hoje quando ainda em andamento); não é sessão. */
+export interface Journey { start: string | null; end: string | null }
 
 export const MONTHS = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 export const WEEKDAYS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
@@ -63,9 +65,9 @@ export function bounds(schedule: Schedule): { start: string | null; end: string 
   return { start, end: start === end ? null : end };
 }
 
-export function appearance(schedule: Schedule, iso: string, today = todayIso()): DayAppearance {
+export function appearance(schedule: Schedule, iso: string, today = todayIso(), journey?: Journey): DayAppearance {
   const kind = schedule[iso];
-  if (!kind) return 'empty';
+  if (!kind) return journey?.start && iso >= journey.start && iso <= (journey.end ?? today) && iso <= today ? 'journey' : 'empty';
   if (iso > today) return 'future';
   if (kind === 'single') return 'single';
   const previous = schedule[addDays(iso, -1)] === 'range', following = schedule[addDays(iso, 1)] === 'range';
@@ -99,4 +101,20 @@ export function shiftMonth(year: number, month: number, amount: number) {
 export function monthOf(iso: string) { const date = parseIso(iso); return { year: date.getFullYear(), month: date.getMonth() + 1 }; }
 export function monthLabel(year: number, month: number) { return `${MONTHS[month - 1]} ${year}`; }
 export function dayLabel(iso: string) { const date = parseIso(iso); return `${date.getDate()} de ${MONTHS[date.getMonth()].toLowerCase()} de ${date.getFullYear()}`; }
-export const APPEARANCE_LABELS: Record<DayAppearance, string> = { empty: 'sem sessão', single: 'dia avulso', edge: 'início ou fim de sequência', middle: 'dentro da sequência', future: 'agendado' };
+export const APPEARANCE_LABELS: Record<DayAppearance, string> = { empty: 'sem sessão', single: 'dia avulso', edge: 'início ou fim de sequência', middle: 'dentro da sequência', future: 'agendado', journey: 'dentro da jornada, sem sessão marcada' };
+
+/**
+ * Dias de jornada: contagem inclusiva de dias corridos (datas locais) do início até hoje, enquanto em andamento, ou até
+ * o término quando concluído. Sem início, não há jornada. Término anterior ao início conta zero.
+ */
+export function journeyDays(start: string | null, end: string | null, stillPlaying: boolean, today = todayIso()): number | null {
+  if (!start) return null;
+  const last = stillPlaying || !end ? today : end;
+  if (last < start) return 0;
+  return daysBetween(start, last) + 1;
+}
+
+/** Dias em que joguei: datas únicas marcadas como sessão real (dia avulso) até hoje. Sequências e dias futuros não contam. */
+export function playedDays(schedule: Schedule, today = todayIso()): number {
+  return Object.entries(schedule).filter(([iso, kind]) => kind === 'single' && iso <= today).length;
+}

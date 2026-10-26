@@ -65,6 +65,21 @@ test('typed dates replace the selection with a continuous interval', () => {
   assert.deepEqual(schedule.scheduleFromDates('2026-09-12', '2026-09-10'), {}, 'inverted dates are left for the form validation');
 });
 
+test('journey days are inclusive and follow today while still playing; played days count only past sessions', () => {
+  assert.equal(typeof schedule.journeyDays, 'function');
+  assert.equal(schedule.journeyDays('2026-09-01', '2026-09-10', false, '2026-10-25'), 10, 'inclusive count up to the end date');
+  assert.equal(schedule.journeyDays('2026-09-01', null, true, '2026-09-03'), 3, 'still playing counts up to today');
+  assert.equal(schedule.journeyDays('2026-09-01', '2026-09-10', true, '2026-09-03'), 3, 'still playing ignores a stale end date');
+  assert.equal(schedule.journeyDays(null, '2026-09-10', false, '2026-10-25'), null, 'no start, no journey');
+  assert.equal(schedule.journeyDays('2026-09-10', '2026-09-01', false, '2026-10-25'), 0);
+  const marks = { '2026-09-01': 'single', '2026-09-02': 'range', '2026-09-03': 'range', '2026-09-05': 'single', '2026-12-25': 'single' };
+  assert.equal(schedule.playedDays(marks, '2026-10-25'), 2, 'ranges and future days are not played days');
+  assert.equal(schedule.appearance({}, '2026-09-02', '2026-10-25', { start: '2026-09-01', end: '2026-09-10' }), 'journey');
+  assert.equal(schedule.appearance({}, '2026-09-20', '2026-10-25', { start: '2026-09-01', end: '2026-09-10' }), 'empty');
+  assert.equal(schedule.appearance({}, '2026-10-20', '2026-10-25', { start: '2026-09-01', end: null }), 'journey', 'an open journey shades up to today');
+  assert.equal(schedule.appearance({ '2026-09-02': 'single' }, '2026-09-02', '2026-10-25', { start: '2026-09-01', end: '2026-09-10' }), 'single', 'a marked session wins over the journey shade');
+});
+
 test('month grid starts on Monday, handles leap years and month navigation limits', () => {
   const october = schedule.monthGrid(2026, 10);
   assert.deepEqual(october[0], [null, null, null, 1, 2, 3, 4]);

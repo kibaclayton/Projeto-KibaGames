@@ -2,20 +2,25 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { BookOpen, CalendarDays, CheckCircle2, ImagePlus, Save, Search, Trash2, Trophy } from 'lucide-react';
 import { Button, Modal } from '../../components/ui';
 import { useBackend } from '../../services/BackendProvider';
-import type { Collection, CoverCandidate, CoverSource, DuplicateRef, GameInput } from '../../services/api';
+import type { Collection, CoverCandidate, CoverSource, DuplicateRef, ExternalDetails, GameInput } from '../../services/api';
 import { CoverImage } from './CoverImage';
 import { CoverSearch } from './CoverSearch';
 import { applyChanges, candidateKey, fillSummary, mergeDetails, safeHttpsUrl, type FillChange } from './coverModel';
 import { GameCalendar } from './GameCalendar';
 import { blankGame, gamePayload, trophies } from './model';
-import { bounds, scheduleFromDates, type Schedule } from './schedule';
+import { journeyDays, playedDays, type Schedule } from './schedule';
 
-const SOURCE_LABELS: Record<CoverSource, string> = { steam: 'Steam', wikipedia: 'Wikipedia' };
+const SOURCE_LABELS: Record<CoverSource, string> = { steam: 'Steam', wikipedia: 'Wikipedia', igdb: 'IGDB' };
 
 /** Valor de um campo na caixa de confirmação: datas em pt-BR e textos longos encurtados. */
 function shown(field: FillChange['field'], value: string) {
   if (field === 'data_lancamento' && /^\d{4}-\d{2}-\d{2}$/.test(value)) { const [year, month, day] = value.split('-'); return `${day}/${month}/${year}`; }
   return value.length > 140 ? `${value.slice(0, 140).trimEnd()}…` : value;
+}
+function formatMoment(iso: string | null) {
+  if (!iso) return '';
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 export function GameEditor({ gameId, collections, onClose, onSaved }: { gameId: number | null; collections: Collection[]; onClose: () => void; onSaved: () => void }) {
@@ -41,33 +46,37 @@ export function GameEditor({ gameId, collections, onClose, onSaved }: { gameId: 
   // Preenchimento pela ficha do jogo escolhido: resumo anunciável, conflitos a confirmar, escolha de plataforma e duplicata.
   const [fillNote, setFillNote] = useState('');
   const [pending, setPending] = useState<FillChange[] | null>(null);
+  const [lastDetails, setLastDetails] = useState<ExternalDetails | null>(null);
   const [platformChoices, setPlatformChoices] = useState<string[]>([]);
   const [duplicate, setDuplicate] = useState<DuplicateRef | null>(null);
   useEffect(() => {
     let active = true;
     setLoading(gameId !== null); setLoaded(gameId === null); setError('');
     if (gameId !== null) api.game(gameId).then(game => {
-      if (active) { const { id: _id, atualizado: _updated, trofeus_percentual: _percent, platinado: _platinum, ...input } = game; setForm({ ...blankGame, ...input }); setLoaded(true); setLoading(false); }
+      if (active) { const { id: _id, atualizado: _updated, trofeus_percentual: _percent, platinado: _platinum, posicao: _position, ...input } = game; setForm({ ...blankGame, ...input }); setLoaded(true); setLoading(false); }
     }).catch(cause => { if (active) { setError(cause.message); setLoading(false); } });
     return () => { active = false; };
   }, [api, gameId, loadAttempt]);
   function field<K extends keyof GameInput>(key: K, value: GameInput[K]) { touched.current.add(key); setForm(old => ({ ...old, [key]: value })); setDirty(true); }
-  // Registros antigos sem cronograma mostram as datas existentes como pontos; só viram cronograma quando o calendário é usado.
-  const schedule: Schedule = Object.keys(form.cronograma).length ? form.cronograma : scheduleFromDates(form.data_inicio, form.data_termino);
-  function scheduleChanged(next: Schedule) {
-    const { start, end } = bounds(next);
-    setForm(old => ({ ...old, cronograma: next, data_inicio: start, data_termino: end }));
+  // O calendário só guarda sessões marcadas pela pessoa; as datas de início/término definem a jornada, não sessões.
+  const schedule: Schedule = form.cronograma;
+  const journey = { start: form.data_inicio, end: form.ainda_jogando ? null : form.data_termino };
+  const journeyTotal = journeyDays(form.data_inicio, form.data_termino, form.ainda_jogando);
+  const played = playedDays(schedule);
+  function scheduleChanged(next: Schedule) { setForm(old => ({ ...old, cronograma: next })); setDirty(true); }
+  function dateChanged(key: 'data_inicio' | 'data_termino', value: string | null) {
+    field(key, value);
+    setJump(current => ({ iso: value, key: current.key + 1 }));
+  }
+  function stillPlaying(checked: boolean) {
+    touched.current.add('ainda_jogando');
+    setForm(old => ({ ...old, ainda_jogando: checked, data_termino: checked ? null : old.data_termino }));
     setDirty(true);
   }
-  function dateChanged(key: 'data_inicio' | 'data_termino', value: string | null) {
-    setForm(old => {
-      const next = { ...old };
-      next[key] = value;
-      if (!next.data_inicio || !next.data_termino || next.data_termino >= next.data_inicio) next.cronograma = scheduleFromDates(next.data_inicio, next.data_termino);
-      return next;
-    });
-    setDirty(true);
-    setJump(current => ({ iso: value, key: current.key + 1 }));
+  function trophyTotal(value: number) {
+    // Editar o total à mão desliga a origem automática: o número passa a ser seu.
+    setForm(old => ({ ...old, trofeus_total: value, trofeus_fonte: '', trofeus_escopo: '', trofeus_consultado_em: null }));
+    touched.current.add('trofeus_total'); setDirty(true);
   }
   async function save(event: FormEvent) {
     event.preventDefault(); if (!loaded || loading || busy) return; setError(''); setBusy(true);
@@ -91,10 +100,12 @@ export function GameEditor({ gameId, collections, onClose, onSaved }: { gameId: 
       setForm(next); setDirty(true);
       setApplied(result.imagem ? { id: result.imagem.id, key: candidateKey(candidate) } : null);
       setAutoOff(true); setAutoNote('');
+      setLastDetails(result.detalhes);
       setPending(merged.conflicts.length ? merged.conflicts : null);
       setPlatformChoices(merged.platformChoices);
       setDuplicate(result.duplicado_em);
-      setFillNote(`${fillSummary(merged.filled, Boolean(result.imagem), SOURCE_LABELS[candidate.fonte])}${result.erro_capa ? ` ${result.erro_capa}` : ''}`);
+      const trophyInfo = result.detalhes.trofeus_total ? '' : ' Total de troféus indisponível nesta fonte; a entrada manual continua valendo.';
+      setFillNote(`${fillSummary(merged.filled, Boolean(result.imagem), SOURCE_LABELS[candidate.fonte])}${result.erro_capa ? ` ${result.erro_capa}` : ''}${merged.trophyNote ? ` ${merged.trophyNote}` : trophyInfo}`);
       return '';
     } catch (cause) { return cause instanceof Error ? cause.message : 'Não foi possível obter os dados deste jogo.'; }
     finally { setBusy(false); }
@@ -110,7 +121,7 @@ export function GameEditor({ gameId, collections, onClose, onSaved }: { gameId: 
         try {
           const result = await api.applyCandidate(candidate.fonte, candidate.id, gameId);
           const picture = result.imagem;
-          if (!picture) continue; // A fonte não tem arte para este jogo; tenta o próximo candidato.
+          if (!picture) continue;
           setForm(old => ({ ...old, capa_id: picture.id })); setDirty(true);
           setApplied({ id: picture.id, key });
           setAutoNote(`Capa aplicada automaticamente para "${query}": ${candidate.titulo} (${SOURCE_LABELS[candidate.fonte]}). Toque num resultado para preencher também os dados do jogo, ou em Remover capa.`);
@@ -146,16 +157,19 @@ export function GameEditor({ gameId, collections, onClose, onSaved }: { gameId: 
           <p role="status" aria-live="polite" className="muted cover-auto-note fill-note">{fillNote && <><CheckCircle2 size={14} /> {fillNote}</>}</p>
           <CoverSearch query={form.nome} auto={!form.capa_id || form.capa_id === applied?.id} busy={busy || autoBusy} selectedKey={applied?.key ?? null} onPick={pickCover} onResults={(ranked, query) => void autoCoverFrom(ranked, query)} />
           <label htmlFor="game-cover-url" className="field-label">Link direto da capa (HTTPS)</label><div className="url-field"><input className="input" id="game-cover-url" type="url" placeholder="https://…/capa.jpg" value={coverUrl} onChange={e => setCoverUrl(e.target.value)} /><Button onClick={() => void image()} disabled={!coverUrl}>Buscar</Button></div>
-          <h3 className="trophy-heading"><CalendarDays size={17} /> Calendário de sessões</h3>
-          <GameCalendar schedule={schedule} onChange={scheduleChanged} jump={jump} />
-          <div className="field-pair"><div><label className="field-label" htmlFor="game-start">Início</label><input id="game-start" className="input" type="date" value={form.data_inicio ?? ''} onChange={e => dateChanged('data_inicio', e.target.value || null)} /></div><div><label className="field-label" htmlFor="game-end">Término</label><input id="game-end" className="input" type="date" value={form.data_termino ?? ''} min={form.data_inicio ?? undefined} onChange={e => dateChanged('data_termino', e.target.value || null)} /></div></div>
-          <p className="calendar-hint">Datas futuras representam planejamento. Editar as datas substitui a seleção do calendário por um intervalo contínuo.</p>
-          <h3 className="trophy-heading"><Trophy size={17} /> Conquistas / Troféus</h3><div className="field-pair"><div><label htmlFor="game-earned" className="field-label">Troféus obtidos</label><input id="game-earned" className="input" type="number" min={0} max={form.trofeus_total} value={form.trofeus_obtidos} onChange={e => field('trofeus_obtidos', Number(e.target.value))} required /></div><div><label htmlFor="game-total" className="field-label">Total de troféus</label><input id="game-total" className="input" type="number" min={0} max={1000000} value={form.trofeus_total} onChange={e => field('trofeus_total', Number(e.target.value))} required /></div></div><progress className="trophy-progress" max={100} value={values.percent} aria-label="Progresso de troféus" /><p className="muted">{values.platinum ? 'Platinado!' : `${values.percent}% · ${values.remaining} troféus restantes`}</p>
+          <h3 className="trophy-heading"><CalendarDays size={17} /> Jornada e sessões</h3>
+          <div className="field-pair"><div><label className="field-label" htmlFor="game-start">Início</label><input id="game-start" className="input" type="date" value={form.data_inicio ?? ''} onChange={e => dateChanged('data_inicio', e.target.value || null)} /></div><div><label className="field-label" htmlFor="game-end">Término</label><input id="game-end" className="input" type="date" value={form.data_termino ?? ''} min={form.data_inicio ?? undefined} disabled={form.ainda_jogando} onChange={e => dateChanged('data_termino', e.target.value || null)} /></div></div>
+          <label className="remember-row"><input type="checkbox" checked={form.ainda_jogando} onChange={e => stillPlaying(e.target.checked)} /><span><strong>Ainda estou jogando</strong><small>Deixa o término vazio e conta os dias de jornada até hoje. Não altera o progresso.</small></span></label>
+          <dl className="journey-facts"><div><dt>Dias de jornada</dt><dd>{journeyTotal === null ? '— (informe o início)' : `${journeyTotal} dia${journeyTotal === 1 ? '' : 's'}`}</dd></div><div><dt>Dias em que joguei</dt><dd>{played} dia{played === 1 ? '' : 's'}</dd></div></dl>
+          <p className="calendar-hint">Dias de jornada são corridos, do início até hoje (ou até o término). Dias em que joguei são só os dias marcados como sessão no calendário; sequências e dias futuros não contam.</p>
+          <GameCalendar schedule={schedule} onChange={scheduleChanged} jump={jump} journey={journey} />
+          <h3 className="trophy-heading"><Trophy size={17} /> Conquistas / Troféus</h3><div className="field-pair"><div><label htmlFor="game-earned" className="field-label">Troféus obtidos</label><input id="game-earned" className="input" type="number" min={0} max={form.trofeus_total} value={form.trofeus_obtidos} onChange={e => field('trofeus_obtidos', Number(e.target.value))} required /></div><div><label htmlFor="game-total" className="field-label">Total de troféus</label><input id="game-total" className="input" type="number" min={0} max={1000000} value={form.trofeus_total} onChange={e => trophyTotal(Number(e.target.value))} required /></div></div><progress className="trophy-progress" max={100} value={values.percent} aria-label="Progresso de troféus" /><p className="muted">{values.platinum ? 'Platinado!' : form.trofeus_total ? `${values.percent}% · ${values.remaining} troféus restantes` : 'Total não informado'}</p>
+          <p className="muted fill-source">{form.trofeus_fonte ? `Total de ${form.trofeus_total} troféus da fonte ${SOURCE_LABELS[form.trofeus_fonte as CoverSource] ?? form.trofeus_fonte} (${form.trofeus_escopo || 'jogo base'}, ${form.plataforma}), consultado em ${formatMoment(form.trofeus_consultado_em)}. Editar o total torna o valor manual.` : 'Total manual. Ao escolher um resultado da Steam, o total de conquistas da edição é sugerido; PlayStation, Xbox e Nintendo não têm fonte pública confiável, então ficam como “não informado” até você preencher.'}</p>
         </div>
       </fieldset>
       {pending && <div className="confirm-box" role="alertdialog" aria-labelledby="fill-confirm-title" aria-describedby="fill-confirm-list"><p id="fill-confirm-title">Alguns campos já estavam preenchidos. Substituir pelos dados da fonte?</p>
         <ul id="fill-confirm-list" className="fill-changes">{pending.map(change => <li key={change.field}><strong>{change.label}:</strong> <s>{shown(change.field, change.current)}</s> passa a ser “{shown(change.field, change.next)}”</li>)}</ul>
-        <Button onClick={() => { setForm(applyChanges(form, pending)); setDirty(true); setPending(null); }}>Substituir</Button><Button onClick={() => setPending(null)}>Manter os meus</Button></div>}
+        <Button onClick={() => { setForm(applyChanges(form, pending, lastDetails ?? undefined)); setDirty(true); setPending(null); }}>Substituir</Button><Button onClick={() => setPending(null)}>Manter os meus</Button></div>}
       {confirmDiscard && <div className="confirm-box" role="alert"><p>Descartar as alterações deste jogo?</p><Button onClick={onClose}>Descartar</Button><Button onClick={() => setConfirmDiscard(false)}>Continuar editando</Button></div>}
       {confirmDelete && <div className="confirm-box" role="alert"><p>Excluir “{form.nome}” da sua biblioteca? Esta ação não pode ser desfeita.</p><Button disabled={busy} onClick={async () => { if (gameId === null) return; setBusy(true); try { await api.deleteGame(gameId); onSaved(); } catch (cause) { setError((cause as Error).message); } finally { setBusy(false); } }}>Confirmar exclusão</Button><Button onClick={() => setConfirmDelete(false)}>Manter jogo</Button></div>}
       <div className="editor-footer">{gameId !== null && <Button onClick={() => setConfirmDelete(true)} disabled={busy}><Trash2 size={16} /> Excluir</Button>}<span /><Button onClick={close} disabled={busy}>Cancelar</Button><Button type="submit" variant="primary" disabled={busy || !form.nome.trim()}><Save size={16} />{busy ? 'Salvando…' : 'Salvar jogo'}</Button></div>

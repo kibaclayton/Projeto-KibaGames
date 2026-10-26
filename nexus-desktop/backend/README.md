@@ -89,6 +89,11 @@ Contrato interativo: `http://127.0.0.1:8765/docs`; JSON: `/openapi.json`. A docu
 | DELETE `/api/conta/aparelhos/{id}` | Esquecer um aparelho |
 | PUT `/api/perfis/{id}/redefinir-senha` | "Esqueci a senha": senha nova + confirmação, sem a atual; só aceito de 127.0.0.1 (nunca pelo celular/rede), 3 por perfil a cada 5 min; revoga sessões e aparelhos lembrados do perfil e registra o evento |
 | GET `/api/conta` | Perfil autenticado |
+| GET/PUT `/api/conta/preferencias` | Preferências visuais do perfil (`tema`, `movimento`, `densidade`, `destaque`; só valores aprovados) |
+| GET `/api/conta/avatares`, PUT/DELETE `/api/conta/avatares/{posicao}` | Galeria de até 5 fotos do perfil; `PUT /api/conta/avatar` define a ativa (entra na galeria se houver vaga; 409 quando cheia) |
+| GET `/api/avatares/busca` | Imagens do Wikimedia Commons (`termo`), com licença e autor; prévia pelo proxy `/api/capas/previa` |
+| PUT `/api/jogos/ordem` | Ordem manual da biblioteca (`ids`); `GET /api/jogos?ordenacao=minha|nome|recentes|progresso|colecao` |
+| GET `/api/capas/fontes` | Se a IGDB está configurada (`igdb.json` na pasta de dados) e onde fica o arquivo |
 | PUT `/api/conta/senha` | Senha atual, nova senha e confirmação |
 | PUT `/api/conta/avatar` | Vincular imagem de avatar ou remover vínculo com `null` |
 | GET `/api/resumo` | Contagens do perfil |

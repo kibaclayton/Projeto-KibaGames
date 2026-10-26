@@ -54,7 +54,8 @@ USER_AGENT = 'NexusWolfs/0.3 (biblioteca pessoal de jogos; aplicativo local)'
 IMAGE_TYPES = ('image/jpeg', 'image/png', 'image/webp')
 
 
-def fetch(url: str, accept: str, content_types: tuple[str, ...], max_bytes: int, allowed_hosts: set[str] | None = None, seconds: float = 25) -> tuple[str, bytes]:
+def fetch(url: str, accept: str, content_types: tuple[str, ...], max_bytes: int, allowed_hosts: set[str] | None = None, seconds: float = 25,
+          method: str = 'GET', body: bytes | None = None, headers: dict[str, str] | None = None) -> tuple[str, bytes]:
     """Fetch over HTTPS with a validated public IP pinned to the TLS hostname, revalidating every redirect.
 
     `allowed_hosts`, when given, restricts both the first URL and each redirect to a closed list of hostnames.
@@ -66,7 +67,7 @@ def fetch(url: str, accept: str, content_types: tuple[str, ...], max_bytes: int,
             raise ValueError('Endereço fora das fontes permitidas.')
         connection = PinnedHTTPS(host, ip)
         try:
-            connection.request('GET', path, headers={'User-Agent': USER_AGENT, 'Accept': accept})
+            connection.request(method, path, body=body, headers={'User-Agent': USER_AGENT, 'Accept': accept, **(headers or {})})
             response = connection.getresponse()
             if response.status in (301, 302, 303, 307, 308):
                 location = response.getheader('Location')

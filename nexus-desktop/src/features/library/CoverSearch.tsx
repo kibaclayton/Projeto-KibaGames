@@ -2,10 +2,11 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { ExternalLink, Search } from 'lucide-react';
 import { Button } from '../../components/ui';
 import { useBackend } from '../../services/BackendProvider';
-import type { CoverCandidate, CoverSource } from '../../services/api';
+import type { CoverCandidate, CoverSource, PlatformFamily } from '../../services/api';
 import { candidateKey, platformSummary, rankCandidates, safeHttpsUrl } from './coverModel';
 
-const SOURCE_LABELS: Record<CoverSource, string> = { steam: 'Steam', wikipedia: 'Wikipedia' };
+const SOURCE_LABELS: Record<CoverSource, string> = { steam: 'Steam', wikipedia: 'Wikipedia', igdb: 'IGDB' };
+const FAMILIES: [PlatformFamily, string][] = [['todas', 'Todas'], ['pc', 'PC'], ['playstation', 'PlayStation'], ['xbox', 'Xbox'], ['nintendo', 'Nintendo']];
 const AUTO_DELAY = 800;
 
 /** Prévia buscada pelo serviço (hosts das fontes apenas); candidatos sem imagem somem da lista. */
@@ -40,6 +41,7 @@ export function CoverSearch({ query, auto, busy, selectedKey, onPick, onResults 
   const [text, setText] = useState(query);
   const [touched, setTouched] = useState(false);
   const [source, setSource] = useState<CoverSource | 'todas'>('todas');
+  const [family, setFamily] = useState<PlatformFamily>('todas');
   const [items, setItems] = useState<CoverCandidate[] | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
@@ -56,10 +58,10 @@ export function CoverSearch({ query, auto, busy, selectedKey, onPick, onResults 
   useEffect(() => { if (!touched) setText(query); }, [query, touched]);
 
   const inFlight = useRef('');
-  async function search(name: string, chosen: CoverSource | 'todas') {
+  async function search(name: string, chosen: CoverSource | 'todas', where: PlatformFamily = family) {
     const trimmed = name.trim();
     if (trimmed.length < 2) { setError('Digite pelo menos 2 caracteres.'); return; }
-    const key = `${chosen}:${trimmed}`;
+    const key = `${chosen}:${where}:${trimmed}`;
     if (inFlight.current === key) return; // A mesma busca já está em andamento.
     request.current?.abort(); // Uma busca mais antiga nunca substitui a mais recente.
     const controller = new AbortController();
@@ -67,7 +69,7 @@ export function CoverSearch({ query, auto, busy, selectedKey, onPick, onResults 
     inFlight.current = key;
     setSearching(true); setError(''); setHidden(new Set()); setFailures({});
     try {
-      const result = await api.searchCovers(trimmed, chosen, controller.signal);
+      const result = await api.searchCovers(trimmed, chosen, controller.signal, where);
       if (controller.signal.aborted) return;
       const ranked = rankCandidates(trimmed, result.itens);
       setItems(ranked); setWarnings(result.avisos); setSearchedFor(trimmed);
@@ -79,9 +81,9 @@ export function CoverSearch({ query, auto, busy, selectedKey, onPick, onResults 
   useEffect(() => {
     const name = text.trim();
     if (!auto || !open || name.length < 3 || name === searchedFor) return;
-    const timer = setTimeout(() => { void search(name, source); }, AUTO_DELAY);
+    const timer = setTimeout(() => { void search(name, source, family); }, AUTO_DELAY);
     return () => clearTimeout(timer);
-  }, [text, source, auto, open]); // eslint-disable-line react-hooks/exhaustive-deps -- searchedFor é lido no momento do disparo.
+  }, [text, source, family, auto, open]); // eslint-disable-line react-hooks/exhaustive-deps -- searchedFor é lido no momento do disparo.
 
   // Erro de um candidato fica só nele, com "Tentar de novo"; os demais resultados e o formulário continuam utilizáveis.
   async function pick(item: CoverCandidate) {
@@ -103,9 +105,10 @@ export function CoverSearch({ query, auto, busy, selectedKey, onPick, onResults 
     <p className="muted cover-hint">Toque num resultado para usar a capa e preencher os campos vazios do jogo. Nada é salvo até você clicar em Salvar jogo.</p>
     <div role="search" className="cover-search-form">
       <input className="input" aria-label="Nome do jogo para buscar" value={text} onChange={event => { setTouched(true); setText(event.target.value); }} onKeyDown={keyDown} maxLength={120} disabled={busy} />
-      <select className="input" aria-label="Fonte dos dados" value={source} onChange={event => setSource(event.target.value as CoverSource | 'todas')} disabled={busy}><option value="todas">Todas as fontes</option><option value="steam">Steam</option><option value="wikipedia">Wikipedia</option></select>
-      <Button variant="secondary" disabled={busy || searching} onClick={() => void search(text, source)}><Search size={16} /> {error ? 'Tentar de novo' : 'Buscar de novo'}</Button>
+      <select className="input" aria-label="Fonte dos dados" value={source} onChange={event => setSource(event.target.value as CoverSource | 'todas')} disabled={busy}><option value="todas">Todas as fontes</option><option value="steam">Steam</option><option value="wikipedia">Wikipedia</option><option value="igdb">IGDB</option></select>
+      <Button variant="secondary" disabled={busy || searching} onClick={() => void search(text, source, family)}><Search size={16} /> {error ? 'Tentar de novo' : 'Buscar de novo'}</Button>
     </div>
+    <div className="family-chips" role="group" aria-label="Plataforma">{FAMILIES.map(([value, label]) => <button key={value} type="button" className={`chip ${family === value ? 'selected' : ''}`} aria-pressed={family === value} disabled={busy} onClick={() => { setFamily(value); setSearchedFor(''); }}>{label}</button>)}</div>
     {error && <p role="alert" className="form-error">{error}</p>}
     {warnings.map(warning => <p key={warning} role="status" className="muted cover-warning">{warning}</p>)}
     {searching && !items && <ul className="cover-results" aria-hidden="true">{[0, 1, 2].map(i => <li key={i}><span className="cover-candidate cover-candidate-loading" /></li>)}</ul>}
@@ -126,6 +129,6 @@ export function CoverSearch({ query, auto, busy, selectedKey, onPick, onResults 
         </li>;
       })}
     </ul>}
-    <p className="muted cover-attribution">Dados e imagens: Steam (Valve); Wikidata (CC0) e Wikipedia (texto CC BY-SA). A imagem de um artigo nem sempre é a capa oficial. A capa escolhida é baixada e guardada só neste computador.</p>
+    <p className="muted cover-attribution">Dados e imagens: Steam (Valve, só PC); Wikidata (CC0) e Wikipedia (texto CC BY-SA), que cobrem PlayStation, Xbox e Nintendo; IGDB (Twitch) quando configurada neste computador. A imagem de um artigo nem sempre é a capa oficial. A capa escolhida é baixada e guardada só neste computador.</p>
   </section>;
 }
