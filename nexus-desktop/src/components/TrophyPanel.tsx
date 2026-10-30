@@ -89,7 +89,7 @@ function SourceBlock({ status, local, onChanged, onLibraryChanged }: { status: T
       <div><label htmlFor={`trophy-key-${status.fonte}`} className="field-label">Chave de API</label><input id={`trophy-key-${status.fonte}`} className="input" type="password" autoComplete="off" value={key} onChange={e => setKey(e.target.value)} required minLength={8} maxLength={80} /></div>
       <div><label htmlFor={`trophy-id-${status.fonte}`} className="field-label">{help.identification}</label><input id={`trophy-id-${status.fonte}`} className="input" value={identification} onChange={e => setIdentification(e.target.value)} placeholder={help.placeholder} required minLength={2} maxLength={40} /></div>
       <Button type="submit" variant="primary" disabled={busy || !key || !identification}><Link2 size={16} /> {busy ? 'Conferindo…' : 'Vincular'}</Button>
-      <p className="muted trophy-help">{help.keyHelp} <a href={help.keyUrl} target="_blank" rel="noreferrer noopener">Abrir página da chave <ExternalLink size={12} /></a>. {help.idHelp} A chave fica só no arquivo <code>{status.arquivo}</code>.</p>
+      <p className="muted trophy-help">{help.keyHelp} <a href={help.keyUrl} target="_blank" rel="noreferrer noopener">Abrir página da chave <ExternalLink size={12} /></a>. {help.idHelp} A chave vale só para este perfil e fica no arquivo <code>{status.arquivo}</code>; cada perfil vincula a própria conta.</p>
     </form>}
     {status.configurada && <>
       <div className="trophy-actions">
@@ -145,7 +145,7 @@ export function TrophyPanel({ onLibraryChanged }: { onLibraryChanged: () => void
 
   return <section className="trophy-panel" aria-labelledby="trophy-title">
     <div className="section-heading"><h3 id="trophy-title"><Trophy size={17} /> Troféus e conquistas</h3><span className={`service-status ${anyLinked ? 'online' : ''}`}>{!status ? 'Consultando…' : anyLinked ? 'Fonte vinculada' : 'Manual'}</span></div>
-    <p className="muted">Sincronize obtidos e total pela sua própria conta, só por APIs oficiais com chave pessoal: Steam (PC) e RetroAchievements (emulação). Fica desligado até você vincular; a chave nunca sai deste computador nem vai para o navegador.</p>
+    <p className="muted">Sincronize obtidos e total pela sua própria conta, só por APIs oficiais com chave pessoal: Steam (PC) e RetroAchievements (emulação). Cada perfil vincula a própria conta; fica desligado até você vincular, e a chave nunca sai deste computador nem vai para o navegador.</p>
     {error && <p role="alert" className="form-error">{error}</p>}
     {status && (Object.keys(status.fontes) as TrophySource[]).map(source => <SourceBlock key={source} status={status.fontes[source]} local={local} onChanged={() => setRefresh(n => n + 1)} onLibraryChanged={onLibraryChanged} />)}
     {anyLinked && <div className="trophy-source">

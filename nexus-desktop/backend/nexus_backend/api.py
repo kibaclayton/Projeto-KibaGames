@@ -633,10 +633,10 @@ def create_app(directory: Path | None = None):
 
     # Troféus por fontes oficiais (Steam Web API e RetroAchievements), com chave pessoal guardada só neste computador.
 
-    def trophy_config_or_409(source: str) -> dict:
-        config = trophies.load_config(db.directory, source)
+    def trophy_config_or_409(source: str, user_id: int) -> dict:
+        config = trophies.load_config(db.directory, source, user_id)
         if not config:
-            raise HTTPException(409, f'{trophies.LABELS[source]} não está vinculada neste computador. Vincule em Conta e preferências.')
+            raise HTTPException(409, f'{trophies.LABELS[source]} não está vinculada a este perfil. Vincule em Conta e preferências.')
         return config
 
     def trophy_allow(user_id: int):
@@ -645,7 +645,7 @@ def create_app(directory: Path | None = None):
 
     @app.get('/api/trofeus/fontes')
     def trophy_sources(request: Request, user_id: User):
-        return {'fontes': trophies.all_status(db.directory), 'local': from_this_computer(request)}
+        return {'fontes': trophies.all_status(db.directory, user_id), 'local': from_this_computer(request)}
 
     @app.put('/api/trofeus/fontes/{fonte}')
     def trophy_link(fonte: TrophySource, model: TrophySourceInput, request: Request, user_id: User):
@@ -664,19 +664,19 @@ def create_app(directory: Path | None = None):
             if exc.codigo == 'credenciais':
                 raise HTTPException(422, str(exc)) from exc
             warning = str(exc)
-        trophies.save_config(db.directory, fonte, config)
-        return {**trophies.status(db.directory, fonte), 'aviso': warning}
+        trophies.save_config(db.directory, fonte, user_id, config)
+        return {**trophies.status(db.directory, fonte, user_id), 'aviso': warning}
 
     @app.delete('/api/trofeus/fontes/{fonte}', status_code=204)
     def trophy_unlink(fonte: TrophySource, request: Request, user_id: User):
         if not from_this_computer(request):
             raise HTTPException(403, 'Fontes de troféus só podem ser desvinculadas neste computador.')
-        trophies.remove_config(db.directory, fonte)
+        trophies.remove_config(db.directory, fonte, user_id)
 
     @app.get('/api/trofeus/{fonte}/jogos')
     def trophy_games(fonte: TrophySource, user_id: User, modo: Literal['recentes', 'possuidos'] = 'recentes'):
         """Jogos da conta vinculada, com a indicação dos que já estão na biblioteca deste perfil."""
-        config = trophy_config_or_409(fonte)
+        config = trophy_config_or_409(fonte, user_id)
         trophy_allow(user_id)
         try:
             items = trophies.list_games(fonte, config, modo)
@@ -693,7 +693,7 @@ def create_app(directory: Path | None = None):
         Só entram identificadores que a própria fonte listou para a conta; jogos já ligados ao mesmo id são ignorados, nunca
         sobrescritos. Progresso, notas, datas e cronograma ficam vazios para você preencher.
         """
-        config = trophy_config_or_409(fonte)
+        config = trophy_config_or_409(fonte, user_id)
         trophy_allow(user_id)
         if model.colecao_id:
             with db.connection() as conn:
@@ -758,13 +758,13 @@ def create_app(directory: Path | None = None):
     def trophy_sync(model: TrophySyncInput, user_id: User):
         """Atualiza obtidos/total dos jogos ligados a fontes vinculadas; falhas são relatadas por jogo e nunca zeram valores."""
         trophy_allow(user_id)
-        configs = {source: trophies.load_config(db.directory, source) for source in trophies.SOURCES}
-        if not any(configs.values()):
-            raise HTTPException(409, 'Nenhuma fonte de troféus vinculada. Vincule a Steam ou o RetroAchievements em Conta e preferências.')
+        configs = trophies.all_configs(db.directory, user_id)
+        if not configs:
+            raise HTTPException(409, 'Nenhuma fonte de troféus vinculada a este perfil. Vincule a Steam ou o RetroAchievements em Conta e preferências.')
         with db.connection() as conn:
             if model.jogo_id:
                 owned(conn, 'jogos', model.jogo_id, user_id)
-            return trophies.sync(conn, user_id, {source: config for source, config in configs.items() if config}, model.jogo_id)
+            return trophies.sync(conn, user_id, configs, model.jogo_id)
 
     @app.get('/api/imagens/{image_id}')
     def image(image_id: str, user_id: User, miniatura: bool = False):

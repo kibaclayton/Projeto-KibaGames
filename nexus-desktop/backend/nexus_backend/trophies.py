@@ -11,7 +11,7 @@ Entram aqui apenas fontes com API pública documentada e permitida para uso pess
 PlayStation, Xbox, Nintendo e Epic não têm API oficial para o usuário final e ficam de fora por decisão de segurança: as
 bibliotecas não oficiais usam a sessão da conta, podem violar os termos de uso e levar a banimento.
 
-As credenciais ficam em `steam.json` / `retroachievements.json` na pasta de dados do Nexus: gravadas só a partir deste
+As credenciais ficam em `steam-perfil-{id}.json` / `retroachievements-perfil-{id}.json` na pasta de dados do Nexus (uma por perfil): gravadas só a partir deste
 computador, nunca devolvidas ao navegador, nunca em logs e fora do Git. Sem o arquivo, a fonte fica desligada e a
 biblioteca segue com troféus manuais.
 """
@@ -59,14 +59,15 @@ class SourceError(ValueError):
 
 # --- Credenciais locais ------------------------------------------------------------------------------------------------
 
-def config_path(data_dir: Path, source: str) -> Path:
-    return Path(data_dir) / FILES[source]
+def config_path(data_dir: Path, source: str, user_id: int) -> Path:
+    """Um arquivo por perfil do Nexus: cada pessoa da casa vincula a própria conta (ex.: `steam-perfil-2.json`)."""
+    return Path(data_dir) / FILES[source].replace('.json', f'-perfil-{int(user_id)}.json')
 
 
-def load_config(data_dir: Path, source: str) -> dict | None:
+def load_config(data_dir: Path, source: str, user_id: int) -> dict | None:
     if source not in FILES:
         return None
-    path = config_path(data_dir, source)
+    path = config_path(data_dir, source, user_id)
     if not path.is_file():
         return None
     try:
@@ -93,28 +94,34 @@ def validate(source: str, api_key: str, identificacao: str) -> dict:
     return {'api_key': api_key, 'identificacao': identificacao}
 
 
-def save_config(data_dir: Path, source: str, config: dict) -> None:
-    config_path(data_dir, source).write_text(json.dumps({'api_key': config['api_key'], 'identificacao': config['identificacao']}), encoding='utf-8')
-    log.info('Fonte %s vinculada neste computador (%s %s).', LABELS[source], IDENTIFICATION_LABEL[source], config['identificacao'])
+def save_config(data_dir: Path, source: str, user_id: int, config: dict) -> None:
+    config_path(data_dir, source, user_id).write_text(json.dumps({'api_key': config['api_key'], 'identificacao': config['identificacao']}), encoding='utf-8')
+    log.info('Fonte %s vinculada ao perfil %s neste computador (%s %s).', LABELS[source], user_id, IDENTIFICATION_LABEL[source], config['identificacao'])
 
 
-def remove_config(data_dir: Path, source: str) -> bool:
-    path = config_path(data_dir, source)
+def remove_config(data_dir: Path, source: str, user_id: int) -> bool:
+    path = config_path(data_dir, source, user_id)
     if not path.is_file():
         return False
     path.unlink()
-    log.info('Fonte %s desvinculada neste computador.', LABELS[source])
+    log.info('Fonte %s desvinculada do perfil %s.', LABELS[source], user_id)
     return True
 
 
-def status(data_dir: Path, source: str) -> dict:
-    config = load_config(data_dir, source)
+def status(data_dir: Path, source: str, user_id: int) -> dict:
+    config = load_config(data_dir, source, user_id)
     return {'fonte': source, 'rotulo': LABELS[source], 'configurada': config is not None,
-            'identificacao': config['identificacao'] if config else '', 'arquivo': str(config_path(data_dir, source))}
+            'identificacao': config['identificacao'] if config else '', 'arquivo': str(config_path(data_dir, source, user_id))}
 
 
-def all_status(data_dir: Path) -> dict:
-    return {source: status(data_dir, source) for source in SOURCES}
+def all_status(data_dir: Path, user_id: int) -> dict:
+    return {source: status(data_dir, source, user_id) for source in SOURCES}
+
+
+def all_configs(data_dir: Path, user_id: int) -> dict[str, dict]:
+    """Só as fontes vinculadas pelo perfil, prontas para `sync`."""
+    configs = {source: load_config(data_dir, source, user_id) for source in SOURCES}
+    return {source: config for source, config in configs.items() if config}
 
 
 # --- HTTP ------------------------------------------------------------------------------------------------------------

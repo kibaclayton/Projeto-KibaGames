@@ -52,14 +52,14 @@ def test_credentials_are_checked_by_format_stored_locally_and_never_echoed(tmp_p
         trophies.validate('steam', STEAM['api_key'], '12345')
     with pytest.raises(ValueError, match='letras e números'):
         trophies.validate('retroachievements', 'chave com espaço', 'kiba')
-    assert trophies.load_config(tmp_path, 'steam') is None and trophies.status(tmp_path, 'steam')['configurada'] is False
-    trophies.save_config(tmp_path, 'steam', trophies.validate('steam', ' ' + STEAM['api_key'] + ' ', STEAM['identificacao']))
-    assert trophies.load_config(tmp_path, 'steam') == STEAM
-    status = trophies.status(tmp_path, 'steam')
+    assert trophies.load_config(tmp_path, 'steam', 1) is None and trophies.status(tmp_path, 'steam', 1)['configurada'] is False
+    trophies.save_config(tmp_path, 'steam', 1, trophies.validate('steam', ' ' + STEAM['api_key'] + ' ', STEAM['identificacao']))
+    assert trophies.load_config(tmp_path, 'steam', 1) == STEAM and trophies.load_config(tmp_path, 'steam', 2) is None, 'one link per profile'
+    status = trophies.status(tmp_path, 'steam', 1)
     assert status['configurada'] and status['identificacao'] == STEAM['identificacao'] and 'api_key' not in status
-    (tmp_path / 'steam.json').write_text('{"api_key": "zz", "identificacao": "76561198000000001"}', encoding='utf-8')
-    assert trophies.load_config(tmp_path, 'steam') is None, 'a malformed file switches the source off instead of sending junk to the network'
-    assert trophies.remove_config(tmp_path, 'steam') is True and trophies.remove_config(tmp_path, 'steam') is False
+    (tmp_path / 'steam-perfil-1.json').write_text('{"api_key": "zz", "identificacao": "76561198000000001"}', encoding='utf-8')
+    assert trophies.load_config(tmp_path, 'steam', 1) is None, 'a malformed file switches the source off instead of sending junk to the network'
+    assert trophies.remove_config(tmp_path, 'steam', 1) is True and trophies.remove_config(tmp_path, 'steam', 1) is False
 
 
 def test_steam_lists_recent_and_owned_games_and_reads_achievements():
@@ -119,6 +119,7 @@ def test_api_links_imports_and_syncs_only_from_this_computer(tmp_path, monkeypat
     app = create_app(tmp_path)
     with TestClient(app, client=('192.168.15.50', 5000)) as phone, TestClient(app, client=('127.0.0.1', 5000)) as local:
         _, headers = profile(local)
+        _, other = profile(local, 'Juan')
         assert local.get('/api/trofeus/fontes').status_code == 401
         sources = local.get('/api/trofeus/fontes', headers=headers).json()
         assert sources['local'] is True and sources['fontes']['steam']['configurada'] is False and sources['fontes']['retroachievements']['rotulo'] == 'RetroAchievements'
@@ -126,7 +127,9 @@ def test_api_links_imports_and_syncs_only_from_this_computer(tmp_path, monkeypat
         assert local.put('/api/trofeus/fontes/steam', headers=headers, json={'api_key': 'curta', 'identificacao': STEAM['identificacao']}).status_code == 422
         assert local.get('/api/trofeus/steam/jogos', headers=headers).status_code == 409, 'nothing linked yet'
         linked = local.put('/api/trofeus/fontes/steam', headers=headers, json={'api_key': STEAM['api_key'], 'identificacao': STEAM['identificacao']})
-        assert linked.status_code == 200 and linked.json()['configurada'] and 'api_key' not in linked.json() and (tmp_path / 'steam.json').is_file()
+        assert linked.status_code == 200 and linked.json()['configurada'] and 'api_key' not in linked.json() and (tmp_path / 'steam-perfil-1.json').is_file()
+        assert local.get('/api/trofeus/fontes', headers=other).json()['fontes']['steam']['configurada'] is False, 'the other profile links its own account'
+        assert local.get('/api/trofeus/steam/jogos', headers=other).status_code == 409
         assert local.put('/api/trofeus/fontes/retroachievements', headers=headers, json={'api_key': RETRO['api_key'], 'identificacao': RETRO['identificacao']}).status_code == 200
         assert phone.get('/api/trofeus/fontes', headers=headers).json()['local'] is False
 
@@ -162,7 +165,7 @@ def test_api_links_imports_and_syncs_only_from_this_computer(tmp_path, monkeypat
         assert local.post('/api/trofeus/sincronizar', headers=headers, json={'jogo_id': 999}).status_code == 404
 
         assert phone.delete('/api/trofeus/fontes/steam', headers=headers).status_code == 403
-        assert local.delete('/api/trofeus/fontes/steam', headers=headers).status_code == 204 and not (tmp_path / 'steam.json').exists()
+        assert local.delete('/api/trofeus/fontes/steam', headers=headers).status_code == 204 and not (tmp_path / 'steam-perfil-1.json').exists()
         assert local.delete('/api/trofeus/fontes/retroachievements', headers=headers).status_code == 204
         assert local.post('/api/trofeus/sincronizar', headers=headers, json={}).status_code == 409
         assert all(STEAM['api_key'] not in call[0] or call[1] == trophies.STEAM_API_HOSTS for call in fetch.calls), 'the key only ever travels to the Steam API host'
