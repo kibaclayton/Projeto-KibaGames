@@ -14,7 +14,7 @@ try {
     $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
     $buildId = Get-Date -Format 'yyyyMMdd-HHmmss'
     $buildName = "NexusWolfs-$version-$buildId"
-    & $pythonExe -m PyInstaller --noconfirm --onedir --windowed --name $buildName --distpath release --workpath work/pyinstaller --specpath work --paths backend --add-data $frontendData --add-data $updaterData --icon $appIcon --collect-all webview --collect-all clr_loader --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.protocols.websockets.auto --hidden-import uvicorn.lifespan.on backend/desktop.py
+    & $pythonExe -m PyInstaller --noconfirm --onedir --windowed --name $buildName --distpath release --workpath work/pyinstaller --specpath work --paths backend --add-data $frontendData --add-data $updaterData --icon $appIcon --collect-all webview --collect-all clr_loader --runtime-hook backend/pyinstaller_rthook_ssl.py --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.protocols.websockets.auto --hidden-import uvicorn.lifespan.on backend/desktop.py
     if ($LASTEXITCODE -ne 0) { throw 'Falha ao gerar o executavel.' }
     $buildDir = Join-Path $projectDir "release\$buildName"
     $relativeExe = "release\$buildName\$buildName.exe"
