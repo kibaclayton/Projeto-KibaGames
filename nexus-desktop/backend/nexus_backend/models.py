@@ -233,7 +233,7 @@ class TrophySourceInput(Model):
 class TrophyImportInput(Model):
     """Jogos da conta vinculada escolhidos para entrar na biblioteca; só identificadores que a própria fonte listou."""
     ids: list[str] = Field(min_length=1, max_length=50)
-    modo: Literal['recentes', 'possuidos'] = 'recentes'
+    modo: Literal['recentes', 'possuidos', 'todos'] = 'recentes'
     colecao_id: int | None = Field(default=None, gt=0)
 
     @field_validator('ids')

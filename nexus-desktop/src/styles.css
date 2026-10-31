@@ -519,3 +519,24 @@ input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer;
 .achievement-text span { font-size: 12px; line-height: 1.45; }
 .achievement-text small { font-size: 11px; color: var(--muted); }
 .achievement-hidden { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 400; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+
+/* Página Troféus */
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.trophy-hub { display: grid; gap: 18px; }
+.trophy-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; padding: 22px; border: 1px solid var(--border); border-radius: 20px; background: linear-gradient(115deg, var(--surface), var(--selected)); }
+.trophy-stats > div { display: grid; gap: 4px; }
+.trophy-stats strong { font-size: 30px; line-height: 1; }
+.trophy-stats small { color: var(--muted); font-size: 12px; }
+.trophy-stats-actions { display: flex; flex-wrap: wrap; align-content: center; gap: 8px; }
+.trophy-games { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.trophy-games li { display: grid; grid-template-columns: 64px 1fr; gap: 16px; align-items: center; padding: 12px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.trophy-games li.is-platinum { border-color: #ffd54f66; background: linear-gradient(115deg, var(--surface), #ffd54f10); }
+.trophy-game-cover { width: 64px; height: 85px; border-radius: 10px; overflow: hidden; }
+.trophy-game-body { display: grid; gap: 6px; min-width: 0; }
+.trophy-game-body .trophy-progress { margin: 4px 0; }
+.trophy-game-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+.trophy-game-head strong { font-size: 14px; }
+.trophy-game-head .muted, .trophy-game-foot { font-size: 12px; }
+.trophy-game-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.trophy-game-foot > span:first-child { display: inline-flex; align-items: center; gap: 6px; }
+.trophy-game-foot .button { margin-left: auto; min-height: 32px; padding: 6px 10px; font-size: 11px; }

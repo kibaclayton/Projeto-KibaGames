@@ -41,9 +41,34 @@ function SourceBlock({ status, local, onChanged, onLibraryChanged }: { status: T
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
   const [confirmUnlink, setConfirmUnlink] = useState(false);
-  const [mode, setMode] = useState<'recentes' | 'possuidos'>('recentes');
+  const [mode, setMode] = useState<'recentes' | 'possuidos' | 'todos'>('recentes');
   const [items, setItems] = useState<TrophyGameItem[] | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Importar todos: lista completa da conta, em lotes de 25 pedidos ao serviço, com progresso visível.
+  const [confirmAll, setConfirmAll] = useState(false);
+  const [importAll, setImportAll] = useState<{ done: number; total: number; imported: number } | null>(null);
+
+  async function importEverything() {
+    setConfirmAll(false); setBusy(true); setError(''); setNote('');
+    const listMode = status.fonte === 'steam' ? 'todos' : 'possuidos';
+    try {
+      const everything = (await api.trophyGames(status.fonte, listMode)).itens.filter(item => !item.na_biblioteca);
+      if (!everything.length) { setNote('Todos os jogos da conta já estão na biblioteca.'); return; }
+      let imported = 0; const skipped: string[] = [];
+      setImportAll({ done: 0, total: everything.length, imported: 0 });
+      for (let start = 0; start < everything.length; start += 25) {
+        const chunk = everything.slice(start, start + 25);
+        const result = await api.importTrophyGames(status.fonte, chunk.map(item => item.id), listMode);
+        imported += result.importados.length;
+        skipped.push(...result.ignorados.filter(g => !g.motivo.startsWith('Já está')).map(g => `${g.nome || g.id}: ${g.motivo}`));
+        setImportAll({ done: Math.min(start + chunk.length, everything.length), total: everything.length, imported });
+        if (result.importados.length) { onLibraryChanged(); void refreshSummary(); }
+      }
+      setNote(`Importação concluída: ${imported} jogo${imported === 1 ? '' : 's'} entraram na biblioteca.${skipped.length ? ` Não entraram: ${skipped.join(' ')}` : ''}`);
+      if (items) await load();
+    } catch (cause) { setError(cause instanceof Error ? `${cause.message} Os jogos já importados ficaram na biblioteca; clique de novo para continuar de onde parou.` : 'A importação parou; clique de novo para continuar.'); }
+    finally { setImportAll(null); setBusy(false); }
+  }
 
   async function link(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError(''); setNote('');
@@ -94,10 +119,13 @@ function SourceBlock({ status, local, onChanged, onLibraryChanged }: { status: T
     {status.configurada && <>
       <div className="trophy-actions">
         <label htmlFor={`trophy-mode-${status.fonte}`} className="muted">Listar</label>
-        <select id={`trophy-mode-${status.fonte}`} className="input trophy-mode" value={mode} disabled={busy} onChange={e => { const next = e.target.value as 'recentes' | 'possuidos'; setMode(next); void load(next); }}><option value="recentes">jogados recentemente</option><option value="possuidos">{status.fonte === 'steam' ? 'todos com tempo de jogo' : 'todos com progresso'}</option></select>
+        <select id={`trophy-mode-${status.fonte}`} className="input trophy-mode" value={mode} disabled={busy} onChange={e => { const next = e.target.value as 'recentes' | 'possuidos' | 'todos'; setMode(next); void load(next); }}><option value="recentes">jogados recentemente</option><option value="possuidos">{status.fonte === 'steam' ? 'todos com tempo de jogo' : 'todos com progresso'}</option>{status.fonte === 'steam' && <option value="todos">todos da conta (inclusive nunca abertos)</option>}</select>
         <Button disabled={busy} onClick={() => void load()}><Download size={16} /> {items ? 'Atualizar lista' : 'Escolher jogos para importar'}</Button>
+        <Button variant="primary" disabled={busy || Boolean(importAll)} onClick={() => setConfirmAll(true)}><Download size={16} /> Importar todos os jogos da conta</Button>
         {local && !confirmUnlink && <Button variant="ghost" disabled={busy} onClick={() => setConfirmUnlink(true)}><Unlink size={16} /> Desvincular</Button>}
       </div>
+      {confirmAll && <div className="confirm-box" role="alertdialog" aria-labelledby={`all-title-${status.fonte}`}><p id={`all-title-${status.fonte}`}>Importar todos os jogos da conta {status.rotulo}{status.fonte === 'steam' ? ' (inclusive os nunca abertos)' : ''}? Cada jogo entra com capa, ficha, tempo de jogo e conquistas; os que já estão na biblioteca são pulados. Isso é feito em lotes de 25 e pode levar alguns minutos numa conta grande; deixe esta janela aberta.</p><Button variant="primary" disabled={busy} onClick={() => void importEverything()}>Importar todos</Button><Button onClick={() => setConfirmAll(false)}>Agora não</Button></div>}
+      {importAll && <p role="status" className="muted trophy-result">Importando {importAll.done} de {importAll.total} jogos… {importAll.imported} entraram até agora.</p>}
       {confirmUnlink && <div className="confirm-box" role="alert"><p>Desvincular {status.rotulo}? A chave é apagada deste computador; os jogos e troféus já importados continuam na biblioteca.</p><Button disabled={busy} onClick={() => void unlink()}>Desvincular</Button><Button onClick={() => setConfirmUnlink(false)}>Manter</Button></div>}
       {items && items.length === 0 && <p className="muted">A fonte não listou jogos para esta conta neste modo.</p>}
       {items && items.length > 0 && <>

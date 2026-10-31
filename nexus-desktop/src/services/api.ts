@@ -62,6 +62,9 @@ export interface TrophyImportResult { importados: { id: number; nome: string; ca
 export interface Achievement { id: string; nome: string; descricao: string; oculta: boolean; obtida: boolean; obtida_em: string | null; icone: string | null; icone_bloqueado: string | null; raridade: number | null; pontos: number | null }
 export interface GameAchievements { jogo: { id: number; nome: string; plataforma: string; fonte: TrophySource; titulo_fonte: string }; itens: Achievement[]; obtidos: number; total: number; consultado_em: string }
 export interface CoverCompletion { atualizados: { id: number; nome: string; titulo_steam: string }[]; sem_correspondencia: { id: number; nome: string; motivo: string }[]; falhas: { id: number; nome: string; motivo: string }[]; restantes: boolean }
+/** Página Troféus: um item por jogo do perfil, já ordenado (platinados, depois maior percentual), e totais. */
+export interface TrophyOverviewItem { id: number; nome: string; plataforma: string; capa_id: string | null; favorito: boolean; trofeus_obtidos: number; trofeus_total: number; percentual: number; platinado: boolean; trofeus_fonte: string; trofeus_consultado_em: string | null; fonte: '' | TrophySource }
+export interface TrophyOverview { itens: TrophyOverviewItem[]; fontes_vinculadas: TrophySource[]; totais: { jogos: number; com_trofeus: number; platinados: number; obtidos: number; total: number; ligados: number } }
 export interface TrophySyncResult {
   atualizados: { id: number; nome: string; antes: { obtidos: number; total: number }; obtidos: number; total: number; mudou: boolean }[];
   ignorados: { id: number; nome: string; motivo: string }[]; consultado_em: string; total: number;
@@ -181,12 +184,13 @@ export class NexusApi {
   /** Vincula uma fonte oficial de troféus; aceito só neste computador. A chave vai para um arquivo local e nunca volta. */
   linkTrophySource(fonte: TrophySource, api_key: string, identificacao: string) { return this.json<TrophySourceStatus & { aviso: string }>(`/trofeus/fontes/${fonte}`, { method: 'PUT', body: JSON.stringify({ api_key, identificacao }) }); }
   unlinkTrophySource(fonte: TrophySource) { return this.json<void>(`/trofeus/fontes/${fonte}`, { method: 'DELETE' }); }
-  trophyGames(fonte: TrophySource, modo: 'recentes' | 'possuidos' = 'recentes', signal?: AbortSignal) { return this.json<{ modo: string; itens: TrophyGameItem[] }>(`/trofeus/${fonte}/jogos?${new URLSearchParams({ modo })}`, { signal }); }
-  importTrophyGames(fonte: TrophySource, ids: string[], modo: 'recentes' | 'possuidos' = 'recentes', colecao_id: number | null = null) {
+  trophyGames(fonte: TrophySource, modo: 'recentes' | 'possuidos' | 'todos' = 'recentes', signal?: AbortSignal) { return this.json<{ modo: string; itens: TrophyGameItem[] }>(`/trofeus/${fonte}/jogos?${new URLSearchParams({ modo })}`, { signal }); }
+  importTrophyGames(fonte: TrophySource, ids: string[], modo: 'recentes' | 'possuidos' | 'todos' = 'recentes', colecao_id: number | null = null) {
     return this.json<TrophyImportResult>(`/trofeus/${fonte}/importar`, { method: 'POST', body: JSON.stringify(colecao_id ? { ids, modo, colecao_id } : { ids, modo }) });
   }
   /** Capas em lote pela Steam para os jogos sem capa e sem fonte; só nomes idênticos recebem capa (até 40 por chamada). */
   completeCovers() { return this.json<CoverCompletion>('/capas/completar', { method: 'POST' }); }
+  trophyOverview(signal?: AbortSignal) { return this.json<TrophyOverview>('/trofeus/resumo', { signal }); }
   gameAchievements(id: number, signal?: AbortSignal) { return this.json<GameAchievements>(`/trofeus/jogo/${id}`, { signal }); }
   syncTrophies(jogo_id: number | null = null) { return this.json<TrophySyncResult>('/trofeus/sincronizar', { method: 'POST', body: JSON.stringify(jogo_id ? { jogo_id } : {}) }); }
   avatar(imagem_id: string | null) { return this.json<{ avatar_id: string | null }>('/conta/avatar', { method: 'PUT', body: JSON.stringify({ imagem_id }) }); }

@@ -201,7 +201,7 @@ def steam_games(config: dict, mode: str = 'recentes', fetch=None) -> list[dict]:
         if not isinstance(game, dict) or not isinstance(game.get('appid'), int) or isinstance(game.get('appid'), bool) or game['appid'] <= 0 or not isinstance(game.get('name'), str):
             continue
         minutes = _int(game.get('playtime_forever'), 100000000)
-        if mode != 'recentes' and minutes == 0:
+        if mode == 'possuidos' and minutes == 0:
             continue  # possuído mas nunca aberto: não é parte da jornada
         app_id = str(game['appid'])
         items.append(_item('steam', app_id, covers._text(game['name'], 150) or f'Steam {app_id}', covers.steam_image(app_id), covers.steam_image(app_id),

@@ -233,6 +233,27 @@ def test_viewer_route_requires_a_linked_game_and_records_the_counts(tmp_path, mo
         assert client.get('/api/trofeus/jogo/999', headers=headers).status_code == 404
 
 
+def test_overview_lists_every_game_with_counts_and_the_all_mode_includes_unplayed_games(tmp_path, monkeypatch):
+    owned_all = {'response': {'game_count': 3, 'games': OWNED['response']['games']}}
+    fetch = transport({'https://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames': RECENT, 'https://api.steampowered.com/IPlayerService/GetOwnedGames': owned_all})
+    monkeypatch.setattr(trophies, 'http_fetch', fetch)
+    assert [item['id'] for item in trophies.steam_games(STEAM, 'todos', fetch)] == ['440', '1091500', '620'], 'never-played games are included in the all mode'
+    with TestClient(create_app(tmp_path), client=('127.0.0.1', 5000)) as client:
+        _, headers = profile(client)
+        client.post('/api/jogos', headers=headers, json={'nome': 'Platinado', 'trofeus_obtidos': 10, 'trofeus_total': 10})
+        client.post('/api/jogos', headers=headers, json={'nome': 'Meio', 'trofeus_obtidos': 3, 'trofeus_total': 6, 'fonte_externa': 'steam', 'id_externo': '1091500'})
+        client.post('/api/jogos', headers=headers, json={'nome': 'Manual'})
+        overview = client.get('/api/trofeus/resumo', headers=headers).json()
+        assert [item['nome'] for item in overview['itens']] == ['Platinado', 'Meio', 'Manual'], 'platinum first, then by percentage, then by name'
+        assert overview['itens'][0]['platinado'] and overview['itens'][1]['percentual'] == 50.0 and overview['itens'][1]['fonte'] == 'steam' and overview['itens'][2]['fonte'] == ''
+        assert overview['totais'] == {'jogos': 3, 'com_trofeus': 2, 'platinados': 1, 'obtidos': 13, 'total': 16, 'ligados': 1} and overview['fontes_vinculadas'] == []
+        client.put('/api/trofeus/fontes/steam', headers=headers, json={'api_key': STEAM['api_key'], 'identificacao': STEAM['identificacao']})
+        assert client.get('/api/trofeus/resumo', headers=headers).json()['fontes_vinculadas'] == ['steam']
+        listed = client.get('/api/trofeus/steam/jogos', headers=headers, params={'modo': 'todos'}).json()
+        assert [item['id'] for item in listed['itens']] == ['440', '1091500', '620'] and listed['itens'][1]['na_biblioteca']['nome'] == 'Meio'
+        assert client.get('/api/trofeus/steam/jogos', headers=headers, params={'modo': 'tudo'}).status_code == 422
+
+
 def test_bulk_steam_covers_only_for_exact_names_and_never_touch_personal_data(tmp_path, monkeypatch):
     search = {'total': 3, 'items': [{'id': 1091500, 'name': 'Cyberpunk 2077', 'type': 'app'}, {'id': 2138330, 'name': 'Cyberpunk 2077: Phantom Liberty', 'type': 'app'}]}
     ambiguous = {'total': 2, 'items': [{'id': 1, 'name': 'Portal', 'type': 'app'}, {'id': 2, 'name': 'Portal', 'type': 'app'}]}

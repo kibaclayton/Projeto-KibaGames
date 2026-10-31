@@ -736,7 +736,7 @@ def create_app(directory: Path | None = None):
         trophies.remove_config(db.directory, fonte, user_id)
 
     @app.get('/api/trofeus/{fonte}/jogos')
-    def trophy_games(fonte: TrophySource, user_id: User, modo: Literal['recentes', 'possuidos'] = 'recentes'):
+    def trophy_games(fonte: TrophySource, user_id: User, modo: Literal['recentes', 'possuidos', 'todos'] = 'recentes'):
         """Jogos da conta vinculada, com a indicação dos que já estão na biblioteca deste perfil."""
         config = trophy_config_or_409(fonte, user_id)
         trophy_allow(user_id)
@@ -815,6 +815,26 @@ def create_app(directory: Path | None = None):
                 saved = save_game(conn, game, user_id)
             imported.append({'id': saved['id'], 'nome': saved['nome'], 'capa': image is not None, 'trofeus': earned is not None})
         return {'importados': imported, 'ignorados': skipped}
+
+    @app.get('/api/trofeus/resumo')
+    def trophy_overview(user_id: User):
+        """Página Troféus: todos os jogos do perfil com obtidos/total, fonte e platina, mais os totais e as fontes vinculadas."""
+        with db.connection() as conn:
+            rows = [dict(row) for row in conn.execute(
+                'SELECT id,nome,plataforma,capa_id,trofeus_obtidos,trofeus_total,trofeus_fonte,trofeus_consultado_em,fonte_externa,id_externo,favorito '
+                'FROM jogos WHERE usuario_id=? ORDER BY (trofeus_total>0 AND trofeus_obtidos=trofeus_total) DESC, '
+                'CASE WHEN trofeus_total>0 THEN trofeus_obtidos*1.0/trofeus_total ELSE -1 END DESC, nome LIMIT 2000', (user_id,))]
+        items = []
+        for row in rows:
+            total, earned = row['trofeus_total'], row['trofeus_obtidos']
+            items.append({'id': row['id'], 'nome': row['nome'], 'plataforma': row['plataforma'], 'capa_id': row['capa_id'], 'favorito': bool(row['favorito']),
+                          'trofeus_obtidos': earned, 'trofeus_total': total, 'percentual': round(earned * 100 / total, 1) if total else 0, 'platinado': total > 0 and earned == total,
+                          'trofeus_fonte': row['trofeus_fonte'], 'trofeus_consultado_em': row['trofeus_consultado_em'],
+                          'fonte': row['fonte_externa'] if row['fonte_externa'] in trophies.SOURCES and row['id_externo'] else ''})
+        linked = [source for source, status_ in trophies.all_status(db.directory, user_id).items() if status_['configurada']]
+        return {'itens': items, 'fontes_vinculadas': linked,
+                'totais': {'jogos': len(items), 'com_trofeus': sum(1 for i in items if i['trofeus_total']), 'platinados': sum(1 for i in items if i['platinado']),
+                           'obtidos': sum(i['trofeus_obtidos'] for i in items), 'total': sum(i['trofeus_total'] for i in items), 'ligados': sum(1 for i in items if i['fonte'])}}
 
     @app.get('/api/trofeus/jogo/{game_id}')
     def trophy_list(game_id: int, user_id: User):

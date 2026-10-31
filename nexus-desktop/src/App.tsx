@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronRight, Folder, Library, Menu, Moon, Palette, RotateCcw, Settings2, Star, Sun, UserRound, X } from 'lucide-react';
+import { ChevronRight, Folder, Library, Menu, Moon, Palette, RotateCcw, Settings2, Star, Sun, Trophy, UserRound, X } from 'lucide-react';
 import { Brand } from './components/Brand';
 import { Button, Modal, Panel } from './components/ui';
 import { DEFAULT_PREFERENCES, devicePreferences, useTheme } from './theme/ThemeProvider';
 import { LibraryView } from './features/library/LibraryView';
+import { TrophyHub } from './features/library/TrophyHub';
 import { AccountPanel } from './components/AccountPanel';
 import { AvatarImage } from './components/AvatarImage';
 import { BackendPanel } from './components/BackendPanel';
@@ -18,6 +19,7 @@ const pages = [
   { id: 'library', label: 'Biblioteca', icon: Library },
   { id: 'collections', label: 'Coleções', icon: Folder },
   { id: 'favorites', label: 'Favoritos', icon: Star },
+  { id: 'trophies', label: 'Troféus', icon: Trophy },
   { id: 'design', label: 'Personalizar visual', icon: Palette },
 ] as const;
 type Page = typeof pages[number]['id'];
@@ -76,7 +78,9 @@ export function App() {
       <header className="topbar"><span className="breadcrumb">Nexus Wolf’s <ChevronRight size={13} /> <span>{title}</span></span><div className="header-actions"><span className="version">NEXUS WOLF’S · 0.3</span><Button variant="ghost" aria-label={theme === 'dark' ? 'Ativar tema claro' : 'Ativar tema escuro'} onClick={toggleTheme}>{theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}</Button><Button variant="ghost" aria-label="Abrir preferências" onClick={() => setSettingsOpen(true)}><Settings2 size={19} /></Button></div></header>
       <main id="content" tabIndex={-1}>
         <div className="page-heading"><div><p className="eyebrow">A PRÓXIMA FASE COMEÇA AQUI</p><h1>{page === 'library' ? 'Seus mundos. Um só lugar.' : title}</h1></div><span className="stage-badge"><span className="status-dot" /> Biblioteca local</span></div>
-        {page === 'design' ? <Personalize preferences={visual.preferences} onChange={visual.update} perProfile={visual.perProfile} saveError={visual.saveError} /> : <LibraryView key={`${session?.perfil.id ?? 0}:${page}:${libraryEpoch}`} section={page} onLogin={() => setSettingsOpen(true)} />}
+        {page === 'design' ? <Personalize preferences={visual.preferences} onChange={visual.update} perProfile={visual.perProfile} saveError={visual.saveError} />
+          : page === 'trophies' ? <TrophyHub key={`${session?.perfil.id ?? 0}:${libraryEpoch}`} onLogin={() => setSettingsOpen(true)} onOpenSettings={() => setSettingsOpen(true)} />
+          : <LibraryView key={`${session?.perfil.id ?? 0}:${page}:${libraryEpoch}`} section={page} onLogin={() => setSettingsOpen(true)} />}
         <footer className="page-footer"><span>NEXUS WOLF’S</span><span>Feito para a sua próxima aventura.</span></footer>
       </main>
     </div>
