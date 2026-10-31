@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
-import { ArrowLeft, ChevronLeft, ChevronRight, FolderInput, FolderPlus, Gamepad2, Grid2X2, List, MoreHorizontal, Plus, Search, Sparkles, Star, Trophy } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, FolderInput, FolderPlus, Gamepad2, Grid2X2, Images, List, MoreHorizontal, Plus, Search, Sparkles, Star, Trophy } from 'lucide-react';
 import { Button, Modal, Panel } from '../../components/ui';
 import { useBackend } from '../../services/BackendProvider';
-import type { Collection, Game, GameSort } from '../../services/api';
+import type { Collection, CoverCompletion, Game, GameSort } from '../../services/api';
 import { CoverImage } from './CoverImage';
 import { FavoriteSpotlight } from './FavoriteSpotlight';
 import { GameCard } from './GameCard';
 import { GameEditor } from './GameEditor';
+import { TrophyViewer } from './TrophyViewer';
 
 type Sort = Exclude<GameSort, 'colecao'>;
 const SORTS: [Sort, string][] = [['minha', 'Minha ordem'], ['nome', 'Nome'], ['recentes', 'Mais recentes'], ['progresso', 'Progresso']];
@@ -36,6 +37,18 @@ export function LibraryView({ section, onLogin }: { section: 'library' | 'favori
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
   const [editor, setEditor] = useState<{ id: number | null } | null>(null);
+  // Visualizador de conquistas (menu do card ou painel do favorito); fechar recarrega a lista, porque a contagem pode ter mudado.
+  const [trophyGame, setTrophyGame] = useState<number | null>(null);
+  // Capas em lote pela Steam: confirmação antes, relatório depois; a lista recarrega quando algum jogo mudou.
+  const [completeAsk, setCompleteAsk] = useState(false);
+  const [completing, setCompleting] = useState(false);
+  const [completion, setCompletion] = useState<CoverCompletion | null>(null);
+  async function completeCovers() {
+    setCompleting(true); setError('');
+    try { const result = await api.completeCovers(); setCompletion(result); setCompleteAsk(false); if (result.atualizados.length) { setRevision(n => n + 1); void refreshSummary(); } }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Não foi possível buscar as capas.'); }
+    finally { setCompleting(false); }
+  }
   const [spotlight, setSpotlight] = useState<number | null>(null);
   const [collectionEditor, setCollectionEditor] = useState<{ id: number | null; name: string; cover: string | null } | null>(null);
   const [deleteCollection, setDeleteCollection] = useState(false);
@@ -141,10 +154,11 @@ export function LibraryView({ section, onLogin }: { section: 'library' | 'favori
   if (!session) return <Panel className="empty-state"><div className="empty-icon"><Gamepad2 size={30} /></div><h2>Seu próximo mundo está aqui</h2><p>Selecione seu perfil para explorar seus jogos e coleções.</p><Button variant="primary" onClick={onLogin}>Escolher meu perfil</Button></Panel>;
   const selectedCollection = collections.find(c => c.id === collectionId);
   const featured = highlights[0];
-  const editorModal = editor && <GameEditor gameId={editor.id} collections={collections} onClose={() => setEditor(null)} onSaved={changed} />;
+  const editorModal = <>{editor && <GameEditor gameId={editor.id} collections={collections} onClose={() => setEditor(null)} onSaved={changed} />}
+    {trophyGame !== null && <TrophyViewer gameId={trophyGame} onClose={changedCounts => { setTrophyGame(null); if (changedCounts) { setRevision(n => n + 1); void refreshSummary(); } }} />}</>;
   const collectionModal = collectionEditor && <Modal open title={collectionEditor.id === null ? 'Criar coleção' : 'Editar coleção'} onClose={() => { if (!collectionBusy) setCollectionEditor(null); }}><form onSubmit={saveCollection}>{collectionError && <p role="alert" className="form-error">{collectionError}</p>}<label htmlFor="collection-name" className="field-label">Nome da coleção</label><input className="input" id="collection-name" value={collectionEditor.name} maxLength={150} required disabled={collectionBusy} onChange={e => setCollectionEditor({ ...collectionEditor, name: e.target.value })} /><div className="control-row"><Button type="submit" variant="primary" disabled={collectionBusy || !collectionEditor.name.trim()}>Salvar coleção</Button>{collectionEditor.id !== null && <Button disabled={collectionBusy} onClick={() => setDeleteCollection(true)}>Excluir coleção</Button>}</div>{deleteCollection && <div className="confirm-box" role="alert"><p>Excluir esta coleção? Seus jogos serão mantidos na biblioteca.</p><Button disabled={collectionBusy} onClick={async () => { if (collectionEditor.id === null) return; setCollectionBusy(true); try { await api.deleteCollection(collectionEditor.id); if (collectionId === collectionEditor.id) setCollectionId(null); setCollectionEditor(null); changed(); } catch (cause) { setCollectionError((cause as Error).message); } finally { setCollectionBusy(false); } }}>Confirmar exclusão</Button><Button disabled={collectionBusy} onClick={() => setDeleteCollection(false)}>Manter coleção</Button></div>}</form></Modal>;
   const grid = (withMenu: boolean, onOpen: (game: Game) => void) => <div className={layout === 'grid' ? 'game-grid' : 'game-list'}>{games.map((game, index) => <GameCard key={game.id} game={game} list={layout === 'list'} pending={pending !== null} onOpen={() => onOpen(game)} onFavorite={() => void favorite(game)}
-    menu={withMenu ? { collections, onMoveToCollection: target => void moveToCollection(game.id, target), onMove: canReorder ? direction => move(game.id, direction) : undefined, first: index === 0, last: index === games.length - 1 } : undefined}
+    menu={withMenu ? { collections, onMoveToCollection: target => void moveToCollection(game.id, target), onMove: canReorder ? direction => move(game.id, direction) : undefined, onTrophies: () => setTrophyGame(game.id), first: index === 0, last: index === games.length - 1 } : undefined}
     drag={withMenu ? dragFor(game) : undefined} />)}</div>;
   const skeleton = <div className="game-grid" aria-label="Carregando jogos" aria-busy="true">{Array.from({ length: 6 }, (_, i) => <div className="card-skeleton" key={i} />)}</div>;
 
@@ -156,7 +170,7 @@ export function LibraryView({ section, onLogin }: { section: 'library' | 'favori
       {error && <div role="alert" className="form-error">{error}<Button onClick={() => setRevision(n => n + 1)}>Tentar novamente</Button></div>}
       {loading && !games.length ? skeleton
         : favoritesTotal === 0 ? <Panel className="empty-state"><div className="empty-icon"><Star size={28} /></div><h3>Seus favoritos vão aparecer aqui</h3><p>Toque na estrela de uma capa na Biblioteca para acompanhar um jogo de perto. Com um só favorito, ele ganha um painel amplo; com vários, cards para comparar.</p></Panel>
-        : shown !== null ? <FavoriteSpotlight gameId={shown} collections={collections} onBack={favoritesTotal > 1 ? () => setSpotlight(null) : undefined} onEdit={() => setEditor({ id: shown })} onChanged={() => { setRevision(n => n + 1); void refreshSummary(); }} />
+        : shown !== null ? <FavoriteSpotlight gameId={shown} collections={collections} onBack={favoritesTotal > 1 ? () => setSpotlight(null) : undefined} onEdit={() => setEditor({ id: shown })} onTrophies={() => setTrophyGame(shown)} onChanged={() => { setRevision(n => n + 1); void refreshSummary(); }} />
         : <>
           <div className="filter-row"><p className="muted">{favoritesTotal} favoritos. Toque num card para abrir a visão ampla.</p><div className="layout-switch" aria-label="Visualização"><Button variant="ghost" aria-label="Grade de capas" aria-pressed={layout === 'grid'} onClick={() => setLayout('grid')}><Grid2X2 size={17} /></Button><Button variant="ghost" aria-label="Lista de jogos" aria-pressed={layout === 'list'} onClick={() => setLayout('list')}><List size={17} /></Button></div></div>
           {grid(false, game => setSpotlight(game.id))}
@@ -188,7 +202,9 @@ export function LibraryView({ section, onLogin }: { section: 'library' | 'favori
     {featured && !query && <section className="featured-game"><CoverImage imageId={featured.capa_id} name={featured.nome} /><div className="featured-copy"><span className="eyebrow"><Sparkles size={14} /> CONTINUE SUA JORNADA</span><h2>{featured.nome}</h2><p>{featured.plataforma} · {featured.progresso}% concluído</p><Button variant="primary" onClick={() => setEditor({ id: featured.id })}>Continuar acompanhando <ChevronRight size={16} /></Button></div><div className="featured-percent" aria-hidden="true">{featured.progresso}<span>%</span></div></section>}
     <div className="library-toolbar"><div className="search-field"><Search size={18} /><input type="search" aria-label="Buscar jogos" placeholder="Encontre seu próximo universo…" value={search} onChange={e => setSearch(e.target.value)} /></div>
       <label className="sort-field"><span className="muted">Ordenar por</span><select className="input" aria-label="Ordenar por" value={sort} onChange={e => { setSort(e.target.value as Sort); setPage(1); }}>{SORTS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-      <div className="layout-switch" aria-label="Visualização"><Button variant="ghost" aria-label="Grade de capas" aria-pressed={layout === 'grid'} onClick={() => setLayout('grid')}><Grid2X2 size={17} /></Button><Button variant="ghost" aria-label="Lista de jogos" aria-pressed={layout === 'list'} onClick={() => setLayout('list')}><List size={17} /></Button></div><Button variant="primary" onClick={() => setEditor({ id: null })}><Plus size={17} /> Adicionar jogo</Button></div>
+      <div className="layout-switch" aria-label="Visualização"><Button variant="ghost" aria-label="Grade de capas" aria-pressed={layout === 'grid'} onClick={() => setLayout('grid')}><Grid2X2 size={17} /></Button><Button variant="ghost" aria-label="Lista de jogos" aria-pressed={layout === 'list'} onClick={() => setLayout('list')}><List size={17} /></Button></div><Button variant="ghost" title="Buscar na Steam as capas dos jogos que ainda estão sem capa" disabled={completing} onClick={() => setCompleteAsk(true)}><Images size={17} /> Capas da Steam</Button><Button variant="primary" onClick={() => setEditor({ id: null })}><Plus size={17} /> Adicionar jogo</Button></div>
+    {completeAsk && <div className="confirm-box" role="alertdialog" aria-labelledby="complete-title"><p id="complete-title">Procurar na Steam as capas dos jogos que estão sem capa e sem fonte (até 40 por vez)? Só jogos com nome idêntico a um resultado recebem a capa, a ficha e o total de conquistas; os demais ficam listados para você escolher no editor. Progresso, notas e datas não mudam.</p><Button variant="primary" disabled={completing} onClick={() => void completeCovers()}>{completing ? 'Procurando…' : 'Procurar capas'}</Button><Button disabled={completing} onClick={() => setCompleteAsk(false)}>Agora não</Button></div>}
+    {completion && <div className="confirm-box" role="status"><p>{completion.atualizados.length ? `Capas aplicadas: ${completion.atualizados.map(g => g.nome).join(', ')}.` : !completion.sem_correspondencia.length && !completion.falhas.length ? 'Todos os jogos já têm capa ou já estão ligados a uma fonte; não havia o que procurar.' : 'Nenhum jogo recebeu capa nesta rodada.'}{completion.sem_correspondencia.length ? ` Sem nome exato na Steam (escolha no editor): ${completion.sem_correspondencia.map(g => g.nome).join(', ')}.` : ''}{completion.falhas.length ? ` Falhas: ${completion.falhas.map(g => `${g.nome} (${g.motivo})`).join('; ')}.` : ''}{completion.restantes ? ' Ainda há jogos sem capa; rode de novo para continuar.' : ''}</p><Button onClick={() => setCompletion(null)}>Fechar</Button></div>}
     <div className="filter-row"><div className="genre-chips" aria-label="Gêneros">{['', 'RPG', 'Ação', 'FPS', 'Aventura', 'Terror', 'Estratégia'].map(value => <button key={value} className={`chip ${genre === value ? 'selected' : ''}`} aria-pressed={genre === value} onClick={() => { setGenre(value); setPage(1); }}>{value || 'Todos'}</button>)}</div><span className="muted">{loading ? 'Carregando…' : `${total} jogo${total !== 1 ? 's' : ''}`}</span></div>
     {sort === 'minha' && <p className="muted order-hint" role="status">{canReorder ? `Arraste uma capa para antes ou depois de outra, ou use o menu do card (Mover antes/depois). ${orderNote}` : manual && total > FULL_VIEW ? `Sua biblioteca tem mais de ${FULL_VIEW} jogos: reordene pelo menu do card.` : query || genre ? 'Arrastar para reordenar fica desligado com busca ou filtro ativo; limpe-os para reordenar.' : orderNote}</p>}
     {dragging !== null && collections.length > 0 && <div className="collection-drop-bar" role="group" aria-label="Soltar numa coleção">{collections.map(collection => <div key={collection.id} className={`collection-drop ${dragOverCollection === collection.id ? 'drop-target' : ''}`} onDragOver={event => { event.preventDefault(); setDragOverCollection(collection.id); }} onDragLeave={() => setDragOverCollection(null)} onDrop={event => { event.preventDefault(); const id = Number(event.dataTransfer.getData('application/x-nexus-game')); setDragging(null); setDropHint(null); if (id) void moveToCollection(id, collection.id); }}><FolderInput size={14} /> {collection.nome}</div>)}</div>}

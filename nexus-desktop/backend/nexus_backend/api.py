@@ -99,6 +99,9 @@ def create_app(directory: Path | None = None):
     device_throttle = Throttle(limit=30, window=60)
     reset_throttle = Throttle(limit=3, window=300)
     trophy_throttle = Throttle(limit=20, window=300)  # listas, importações e sincronizações de troféus por perfil
+    trophy_view_throttle = Throttle(limit=60, window=300)  # visualizador de conquistas por jogo
+    complete_throttle = Throttle(limit=3, window=600)  # capas em lote pela Steam: dezenas de pedidos por execução
+    achievements_cache = Cache(60 * 60)  # esquema e raridade global por jogo (nunca o estado do jogador)
     app.state.db = db
     app.state.sessions = sessions
     app.state.network = network
@@ -610,6 +613,65 @@ def create_app(directory: Path | None = None):
             duplicate = find_duplicate(conn, user_id, model.fonte, model.id, model.jogo_id)
         return {'detalhes': details, 'imagem': image, 'erro_capa': image_error, 'duplicado_em': duplicate}
 
+    @app.post('/api/capas/completar')
+    def cover_complete(user_id: User):
+        """Capas em lote pela Steam para os jogos sem capa e sem fonte: só quando o nome bate exatamente com um resultado.
+
+        Além da capa, o jogo fica ligado ao appid (fonte/id/origem) e os campos de ficha vazios são preenchidos; progresso,
+        notas, datas, troféus obtidos e o que já estava preenchido não mudam. Nomes sem correspondência exata voltam na lista
+        "escolha no editor", nunca recebem uma capa por palpite. Até 40 jogos por chamada.
+        """
+        if not complete_throttle.allow(user_id):
+            raise HTTPException(429, 'A busca em lote já rodou há pouco. Aguarde alguns minutos.', headers={'Retry-After': '600'})
+        with db.connection() as conn:
+            rows = [dict(row) for row in conn.execute("SELECT id,nome FROM jogos WHERE usuario_id=? AND capa_id IS NULL AND fonte_externa='' ORDER BY posicao,id LIMIT 41", (user_id,))]
+        pending_more = len(rows) > 40
+        done, unmatched, failed = [], [], []
+        for row in rows[:40]:
+            wanted = normalize(row['nome'])
+            try:
+                candidates = search_covers(row['nome'], ('steam',), cache=search_cache, family='pc')['itens']
+            except (ValueError, OSError, http.client.HTTPException):
+                failed.append({'id': row['id'], 'nome': row['nome'], 'motivo': 'A Steam não respondeu à busca.'})
+                continue
+            exact = [item for item in candidates if normalize(item['titulo']) == wanted]
+            if len(exact) != 1:
+                unmatched.append({'id': row['id'], 'nome': row['nome'], 'motivo': 'Nenhum resultado com o nome exato.' if not exact else 'Mais de um resultado com o mesmo nome.'})
+                continue
+            try:
+                details = external_details('steam', exact[0]['id'])
+                image = process_image(user_id, 'capa', download_cover(details), None)
+            except (HTTPException, ValueError, OSError, http.client.HTTPException) as exc:
+                if isinstance(exc, HTTPException) and exc.status_code >= 500:
+                    raise
+                logging.getLogger('nexus.capas').warning('Capa em lote de "%s" (appid %s) falhou: %s', row['nome'], exact[0]['id'], exc.detail if isinstance(exc, HTTPException) else exc)
+                failed.append({'id': row['id'], 'nome': row['nome'], 'motivo': 'A Steam não forneceu a capa deste jogo.'})
+                continue
+            with db.connection() as conn:
+                conn.execute('BEGIN IMMEDIATE')
+                previous = game_result(owned(conn, 'jogos', row['id'], user_id))
+                current = {k: v for k, v in previous.items() if k in GameInput.model_fields}
+                changes = {'capa_id': image['id'], 'fonte_externa': 'steam', 'id_externo': exact[0]['id'], 'url_origem': details['origem']}
+                for field, value in (('genero', details['genero']), ('data_lancamento', details['data_lancamento']), ('desenvolvedor', ', '.join(details['desenvolvedores'])[:200]),
+                                     ('publicadora', ', '.join(details['publicadoras'])[:200]), ('descricao', details['descricao'])):
+                    if value and not current.get(field):
+                        changes[field] = value
+                if details.get('trofeus_total') and not current['trofeus_total']:
+                    changes.update(trofeus_total=details['trofeus_total'], trofeus_fonte=details['trofeus_fonte'], trofeus_escopo=details['trofeus_escopo'], trofeus_consultado_em=details['trofeus_consultado_em'])
+                sheet = dict(current.get('ficha') or {})
+                for key, value in (details.get('ficha') or {}).items():
+                    if value not in (None, '', []) and sheet.get(key) in (None, '', []):
+                        sheet[key] = value
+                changes['ficha'] = sheet
+                try:
+                    model = GameInput.model_validate({**current, **changes})
+                except ValidationError:
+                    failed.append({'id': row['id'], 'nome': row['nome'], 'motivo': 'A ficha da Steam não passou na validação do Nexus.'})
+                    continue
+                save_game(conn, model, user_id, row['id'])
+            done.append({'id': row['id'], 'nome': row['nome'], 'titulo_steam': exact[0]['titulo']})
+        return {'atualizados': done, 'sem_correspondencia': unmatched, 'falhas': failed, 'restantes': pending_more}
+
     @app.get('/api/capas/previa')
     def cover_preview(user_id: User, url: str = Query(..., min_length=12, max_length=2048)):
         # Only the image hosts of the built-in sources; everything else is refused before any connection.
@@ -753,6 +815,29 @@ def create_app(directory: Path | None = None):
                 saved = save_game(conn, game, user_id)
             imported.append({'id': saved['id'], 'nome': saved['nome'], 'capa': image is not None, 'trofeus': earned is not None})
         return {'importados': imported, 'ignorados': skipped}
+
+    @app.get('/api/trofeus/jogo/{game_id}')
+    def trophy_list(game_id: int, user_id: User):
+        """Visualizador: cada conquista do jogo (nome, descrição, ícone, obtida e quando, raridade) pela conta vinculada do perfil.
+
+        A contagem que a fonte devolve é gravada no jogo, como na sincronização; esquema e raridade ficam em cache por uma hora.
+        """
+        with db.connection() as conn:
+            game = game_result(owned(conn, 'jogos', game_id, user_id))
+        source = game['fonte_externa']
+        if source not in trophies.SOURCES or not game['id_externo']:
+            raise HTTPException(409, 'Este jogo não está ligado à Steam nem ao RetroAchievements. No editor, escolha o resultado da Steam, ou importe o jogo pela conta vinculada.')
+        config = trophy_config_or_409(source, user_id)
+        if not trophy_view_throttle.allow(user_id):
+            raise HTTPException(429, 'Muitas consultas de troféus seguidas. Aguarde alguns minutos.', headers={'Retry-After': '300'})
+        try:
+            result = trophies.achievement_list(source, config, game['id_externo'], cache=achievements_cache)
+        except trophies.SourceError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        with db.connection() as conn:
+            stamp = trophies.record_counts(conn, user_id, game_id, source, result['obtidos'], result['total'], result['escopo'])
+        return {'jogo': {'id': game['id'], 'nome': game['nome'], 'plataforma': game['plataforma'], 'fonte': source, 'titulo_fonte': result['titulo']},
+                'itens': result['itens'], 'obtidos': result['obtidos'], 'total': result['total'], 'consultado_em': stamp}
 
     @app.post('/api/trofeus/sincronizar')
     def trophy_sync(model: TrophySyncInput, user_id: User):

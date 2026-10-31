@@ -500,3 +500,22 @@ input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer;
 .ficha-times .input { min-width: 0; }
 .ficha-time-label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 6px; }
 .requirements-input { min-height: 110px; font: inherit; font-size: 12px; line-height: 1.5; resize: vertical; white-space: pre-wrap; }
+
+/* Visualizador de conquistas */
+.achievement-summary strong { font-size: 18px; }
+.achievement-summary .trophy-progress { margin: 10px 0 6px; }
+.achievement-summary p.muted { font-size: 12px; line-height: 1.5; }
+.achievement-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 16px 0 6px; }
+.achievement-controls .family-chips { margin-top: 0; }
+.achievement-controls label.muted { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.achievement-list { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 8px; }
+.achievement-list li { display: grid; grid-template-columns: 56px 1fr; gap: 14px; align-items: center; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-raised); opacity: .72; }
+.achievement-list li.is-earned { opacity: 1; border-color: #9d00ff55; }
+.achievement-icon { display: flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 10px; background: #171723; color: var(--muted); overflow: hidden; }
+.achievement-icon img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.achievement-icon.is-locked img { filter: grayscale(1) brightness(.75); }
+.achievement-text { display: grid; gap: 3px; min-width: 0; }
+.achievement-text strong { font-size: 13px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.achievement-text span { font-size: 12px; line-height: 1.45; }
+.achievement-text small { font-size: 11px; color: var(--muted); }
+.achievement-hidden { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 400; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }

@@ -176,3 +176,94 @@ def test_igdb_candidates_can_be_applied_like_the_other_sources(tmp_path):
         _, headers = profile(client)
         response = client.post('/api/capas/aplicar', headers=headers, json={'fonte': 'igdb', 'id': '1942'})
         assert response.status_code == 404 and 'IGDB não configurada' in response.text, 'accepted by validation; refused only because there is no local key'
+
+
+SCHEMA = {'game': {'gameName': 'Cyberpunk 2077', 'availableGameStats': {'achievements': [
+    {'name': 'a', 'displayName': 'O Começo', 'hidden': 0, 'description': 'Termine o prólogo.', 'icon': 'https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/1091500/a.jpg', 'icongray': 'https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/1091500/a_gray.jpg'},
+    {'name': 'b', 'displayName': 'Segredo', 'hidden': 1, 'description': '', 'icon': 'https://evil.example/b.jpg', 'icongray': 'https://evil.example/b.jpg'},
+    {'name': 'c', 'displayName': 'Lenda', 'hidden': 0, 'description': 'Vire lenda.', 'icon': 'https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/1091500/c.jpg', 'icongray': 'https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/1091500/c_gray.jpg'}]}}}
+PLAYER = {'playerstats': {'success': True, 'gameName': 'Cyberpunk 2077', 'achievements': [{'apiname': 'c', 'achieved': 1, 'unlocktime': 1760000000}, {'apiname': 'a', 'achieved': 1, 'unlocktime': 1759000000}, {'apiname': 'b', 'achieved': 0, 'unlocktime': 0}]}}
+GLOBAL = {'achievementpercentages': {'achievements': [{'name': 'a', 'percent': 71.3}, {'name': 'b', 'percent': '3.9'}, {'name': 'c', 'percent': 'x'}]}}
+RETRO_INFO = {'Title': 'Super Mario World', 'NumDistinctPlayers': 200, 'Achievements': {
+    '2': {'ID': 2, 'Title': 'Yoshi', 'Description': 'Encontre o Yoshi.', 'Points': 5, 'BadgeName': '00002', 'DisplayOrder': 2, 'NumAwarded': 150, 'DateEarned': '2026-10-20 21:05:00'},
+    '1': {'ID': 1, 'Title': 'Primeiro passo', 'Description': 'Termine a primeira fase.', 'Points': 1, 'BadgeName': '00001', 'DisplayOrder': 1, 'NumAwarded': 190, 'DateEarnedHardcore': '2026-10-20 20:30:00', 'DateEarned': '2026-10-20 20:30:00'},
+    '3': {'ID': 3, 'Title': 'Estrela', 'Description': 'Ache a saída secreta.', 'Points': 10, 'BadgeName': 'bad name', 'DisplayOrder': 3, 'NumAwarded': 4}}}
+
+
+def test_achievement_lists_keep_source_order_hide_foreign_icons_and_expose_rarity():
+    fetch = transport({'https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements': PLAYER, 'https://api.steampowered.com/ISteamUserStats/GetSchemaForGame': SCHEMA,
+                       'https://api.steampowered.com/ISteamUserStats/GetGlobalAchievementPercentagesForApp': GLOBAL, 'https://retroachievements.org/API/API_GetGameInfoAndUserProgress.php': RETRO_INFO})
+    cache = covers.Cache(3600)
+    steam = trophies.steam_achievement_list(STEAM, '1091500', fetch, cache)
+    assert [item['id'] for item in steam['itens']] == ['a', 'b', 'c'] and steam['obtidos'] == 2 and steam['total'] == 3 and steam['titulo'] == 'Cyberpunk 2077'
+    first, hidden, legend = steam['itens']
+    assert first['nome'] == 'O Começo' and first['obtida'] and first['obtida_em'] == '2025-09-27T19:06:40+00:00' and first['raridade'] == 71.3 and first['icone'].endswith('/a.jpg')
+    assert hidden['oculta'] and not hidden['obtida'] and hidden['icone'] is None and hidden['raridade'] == 3.9, 'foreign icon hosts are dropped; string percentages are read'
+    assert legend['raridade'] is None and legend['icone'].startswith('https://steamcdn-a.akamaihd.net/')
+    assert set(first) == {'id', 'nome', 'descricao', 'oculta', 'obtida', 'obtida_em', 'icone', 'icone_bloqueado', 'raridade', 'pontos'}
+    calls_before = len(fetch.calls)
+    trophies.steam_achievement_list(STEAM, '1091500', fetch, cache)
+    assert len(fetch.calls) - calls_before == 1, 'schema and rarity come from the cache; only the player state is fetched again'
+    retro = trophies.retro_achievement_list(RETRO, '11240', fetch)
+    assert [item['nome'] for item in retro['itens']] == ['Primeiro passo', 'Yoshi', 'Estrela'] and retro['obtidos'] == 2 and retro['total'] == 3
+    assert retro['itens'][0]['obtida_em'] == '2026-10-20T20:30:00+00:00' and retro['itens'][0]['raridade'] == 95.0 and retro['itens'][0]['pontos'] == 1
+    assert retro['itens'][0]['icone'] == 'https://media.retroachievements.org/Badge/00001.png' and retro['itens'][0]['icone_bloqueado'].endswith('00001_lock.png')
+    assert retro['itens'][2]['icone'] is None and not retro['itens'][2]['obtida'] and retro['itens'][2]['raridade'] == 2.0
+    with pytest.raises(trophies.SourceError):
+        trophies.steam_achievement_list(STEAM, '620', transport({}, fail={'https://api.steampowered.com/': 400}))
+
+
+def test_viewer_route_requires_a_linked_game_and_records_the_counts(tmp_path, monkeypatch):
+    fetch = transport({'https://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames': RECENT, 'https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements': PLAYER,
+                       'https://api.steampowered.com/ISteamUserStats/GetSchemaForGame': SCHEMA, 'https://api.steampowered.com/ISteamUserStats/GetGlobalAchievementPercentagesForApp': GLOBAL})
+    monkeypatch.setattr(trophies, 'http_fetch', fetch)
+    with TestClient(create_app(tmp_path), client=('127.0.0.1', 5000)) as client:
+        _, headers = profile(client)
+        manual = client.post('/api/jogos', headers=headers, json={'nome': 'Manual'}).json()
+        linked = client.post('/api/jogos', headers=headers, json={'nome': 'Cyberpunk 2077', 'fonte_externa': 'steam', 'id_externo': '1091500', 'trofeus_total': 44, 'trofeus_obtidos': 0}).json()
+        assert client.get(f'/api/trofeus/jogo/{manual["id"]}', headers=headers).status_code == 409
+        assert client.get(f'/api/trofeus/jogo/{linked["id"]}', headers=headers).status_code == 409, 'nothing linked for this profile yet'
+        client.put('/api/trofeus/fontes/steam', headers=headers, json={'api_key': STEAM['api_key'], 'identificacao': STEAM['identificacao']})
+        result = client.get(f'/api/trofeus/jogo/{linked["id"]}', headers=headers)
+        assert result.status_code == 200, result.text
+        body = result.json()
+        assert body['jogo']['fonte'] == 'steam' and body['obtidos'] == 2 and body['total'] == 3 and len(body['itens']) == 3 and body['consultado_em']
+        game = client.get(f'/api/jogos/{linked["id"]}', headers=headers).json()
+        assert game['trofeus_obtidos'] == 2 and game['trofeus_total'] == 3 and game['trofeus_fonte'] == 'steam', 'the viewer refreshes the stored counts'
+        assert client.get('/api/trofeus/jogo/999', headers=headers).status_code == 404
+
+
+def test_bulk_steam_covers_only_for_exact_names_and_never_touch_personal_data(tmp_path, monkeypatch):
+    search = {'total': 3, 'items': [{'id': 1091500, 'name': 'Cyberpunk 2077', 'type': 'app'}, {'id': 2138330, 'name': 'Cyberpunk 2077: Phantom Liberty', 'type': 'app'}]}
+    ambiguous = {'total': 2, 'items': [{'id': 1, 'name': 'Portal', 'type': 'app'}, {'id': 2, 'name': 'Portal', 'type': 'app'}]}
+    nothing = {'total': 1, 'items': [{'id': 3, 'name': 'Outro jogo', 'type': 'app'}]}
+
+    def fetch(url, accept, content_types, max_bytes, allowed_hosts=None, seconds=25, method='GET', body=None, headers=None):
+        if url.endswith('.jpg'):
+            return 'image/png', image_bytes()
+        if 'storesearch' in url:
+            value = search if 'yberpunk' in url else ambiguous if 'Portal' in url else nothing
+            return 'application/json', json.dumps(value).encode()
+        if 'appdetails' in url:
+            return 'application/json', json.dumps(APPDETAILS).encode()
+        raise AssertionError('URL inesperada: ' + url)
+    monkeypatch.setattr(covers, 'fetch', fetch)
+    with TestClient(create_app(tmp_path)) as client:
+        _, headers = profile(client)
+        cyber = client.post('/api/jogos', headers=headers, json={'nome': 'cyberpunk 2077', 'progresso': 40, 'notas': 'minhas', 'genero': 'Ação', 'trofeus_obtidos': 0}).json()
+        portal = client.post('/api/jogos', headers=headers, json={'nome': 'Portal'}).json()
+        client.post('/api/jogos', headers=headers, json={'nome': 'Inexistente'})
+        picture = client.post('/api/imagens?tipo=capa', headers=headers, content=image_bytes()).json()
+        client.post('/api/jogos', headers=headers, json={'nome': 'Já com capa', 'capa_id': picture['id']})
+        result = client.post('/api/capas/completar', headers=headers)
+        assert result.status_code == 200, result.text
+        body = result.json()
+        assert [g['nome'] for g in body['atualizados']] == ['cyberpunk 2077'] and body['atualizados'][0]['titulo_steam'] == 'Cyberpunk 2077'
+        assert {g['nome'] for g in body['sem_correspondencia']} == {'Portal', 'Inexistente'} and body['falhas'] == [] and body['restantes'] is False
+        updated = client.get(f'/api/jogos/{cyber["id"]}', headers=headers).json()
+        assert updated['capa_id'] and updated['fonte_externa'] == 'steam' and updated['id_externo'] == '1091500' and updated['url_origem'] == 'https://store.steampowered.com/app/1091500/'
+        assert updated['progresso'] == 40 and updated['notas'] == 'minhas' and updated['nome'] == 'cyberpunk 2077', 'personal data and the typed name stay'
+        assert updated['genero'] == 'Ação' and updated['desenvolvedor'] == 'CD PROJEKT RED' and updated['trofeus_total'] == 3 and updated['trofeus_fonte'] == 'steam', 'only empty fields are filled'
+        assert client.get(f'/api/jogos/{portal["id"]}', headers=headers).json()['capa_id'] is None
+        again = client.post('/api/capas/completar', headers=headers).json()
+        assert again['atualizados'] == [] and len(again['sem_correspondencia']) == 2, 'already linked games are skipped'

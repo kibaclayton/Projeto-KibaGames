@@ -98,6 +98,8 @@ Contrato interativo: `http://127.0.0.1:8765/docs`; JSON: `/openapi.json`. A docu
 | PUT/DELETE `/api/trofeus/fontes/{fonte}` | Vincular (chave + SteamID64/usuário, com consulta de teste) ou desvincular; só de 127.0.0.1 |
 | GET `/api/trofeus/{fonte}/jogos` | Jogos da conta vinculada (`modo` = recentes ou possuidos) com prévia, tempo, conquistas e o jogo já ligado na biblioteca |
 | POST `/api/trofeus/{fonte}/importar` | Cria jogos a partir de `ids` listados pela fonte (ficha, capa, tempo e conquistas; sem tocar dados pessoais); duplicatas ignoradas |
+| GET `/api/trofeus/jogo/{id}` | Visualizador: conquistas do jogo (nome, descrição, ícone, obtida e quando, raridade) pela conta vinculada; grava obtidos/total |
+| POST `/api/capas/completar` | Capas em lote pela Steam para jogos sem capa e sem fonte; só nome exato; até 40 por chamada |
 | POST `/api/trofeus/sincronizar` | Atualiza obtidos/total dos jogos ligados às fontes vinculadas (`jogo_id` opcional); falhas relatadas por jogo, valores nunca zerados |
 | PUT `/api/conta/senha` | Senha atual, nova senha e confirmação |
 | PUT `/api/conta/avatar` | Vincular imagem de avatar ou remover vínculo com `null` |

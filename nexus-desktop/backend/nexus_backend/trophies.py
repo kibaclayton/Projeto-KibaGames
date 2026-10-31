@@ -378,3 +378,132 @@ def sync(conn, user_id: int, configs: dict[str, dict], game_id: int | None = Non
         conn.executemany("UPDATE jogos SET trofeus_obtidos=?, trofeus_total=?, trofeus_fonte=?, trofeus_escopo=?, trofeus_consultado_em=?, "
                          "atualizado=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND usuario_id=?", writes)
     return {'atualizados': updated, 'ignorados': skipped, 'consultado_em': stamp, 'total': len(rows)}
+
+
+# --- Lista de conquistas de um jogo (visualizador) ----------------------------------------------------------------------
+
+STEAM_ICON_HOSTS = covers.STEAM_IMAGE_HOSTS | {'steamcdn-a.akamaihd.net', 'media.steampowered.com'}
+
+
+def _icon(url, hosts: set[str]) -> str | None:
+    return url if isinstance(url, str) and covers._image_allowed(url, hosts) else None
+
+
+def _achievement(identifier: str, name: str, description: str, earned: bool, earned_at: str | None, icon: str | None,
+                 locked_icon: str | None, rarity: float | None, hidden: bool = False, points: int | None = None) -> dict:
+    """Uma conquista em formato fechado: só estes campos chegam ao navegador."""
+    return {'id': identifier[:120], 'nome': name[:150] or identifier[:150], 'descricao': description[:500], 'oculta': hidden, 'obtida': earned,
+            'obtida_em': earned_at, 'icone': icon, 'icone_bloqueado': locked_icon, 'raridade': rarity, 'pontos': points}
+
+
+def _cached(cache, key: str, loader):
+    if cache is not None and (hit := cache.get(key)) is not None:
+        return hit
+    value = loader()
+    if cache is not None:
+        cache.set(key, value)
+    return value
+
+
+def _stamp_from_epoch(stamp) -> str | None:
+    if isinstance(stamp, (int, float)) and not isinstance(stamp, bool) and stamp > 0:
+        return datetime.fromtimestamp(int(stamp), timezone.utc).isoformat(timespec='seconds')
+    return None
+
+
+def steam_achievement_list(config: dict, app_id: str, fetch=None, cache=None) -> dict:
+    """Conquistas do jogo com o estado do jogador; esquema (nomes, ícones, ocultas) e raridade global ficam em cache, o estado não."""
+    if not re.fullmatch(r'[0-9]{1,10}', app_id):
+        raise SourceError('indisponivel', 'Identificador inválido para a Steam.')
+    try:
+        player = _json(_steam_url('ISteamUserStats/GetPlayerAchievements/v1', config, appid=app_id, l='portuguese'), STEAM_API_HOSTS, fetch)
+    except SourceError as exc:
+        if exc.status == 400:
+            raise SourceError('sem_conquistas', 'Este jogo não tem conquistas na Steam.', 400) from exc
+        if exc.status == 403:
+            raise SourceError('privado', 'A Steam recusou: a chave é inválida ou o perfil não tem "Detalhes do jogo" públicos.', 403) from exc
+        raise
+    stats = player.get('playerstats') if isinstance(player, dict) and isinstance(player.get('playerstats'), dict) else {}
+    entries = [entry for entry in (stats.get('achievements') if isinstance(stats.get('achievements'), list) else []) if isinstance(entry, dict) and isinstance(entry.get('apiname'), str)]
+    if not stats.get('success') or not entries:
+        raise SourceError('sem_conquistas', 'Este jogo não tem conquistas na Steam.')
+
+    def load_schema():
+        result = _json(_steam_url('ISteamUserStats/GetSchemaForGame/v2', config, appid=app_id, l='portuguese'), STEAM_API_HOSTS, fetch)
+        game = result.get('game') if isinstance(result, dict) and isinstance(result.get('game'), dict) else {}
+        block = game.get('availableGameStats') if isinstance(game.get('availableGameStats'), dict) else {}
+        rows = block.get('achievements') if isinstance(block.get('achievements'), list) else []
+        return {row['name']: row for row in rows if isinstance(row, dict) and isinstance(row.get('name'), str)}
+
+    def load_rarity():
+        try:
+            result = _json(f'https://api.steampowered.com/ISteamUserStats/GetGlobalAchievementPercentagesForApp/v2/?gameid={app_id}', STEAM_API_HOSTS, fetch)
+        except SourceError:
+            return {}
+        block = result.get('achievementpercentages') if isinstance(result, dict) and isinstance(result.get('achievementpercentages'), dict) else {}
+        rarity = {}
+        for row in block.get('achievements') if isinstance(block.get('achievements'), list) else []:
+            if isinstance(row, dict) and isinstance(row.get('name'), str):
+                try:
+                    rarity[row['name']] = round(float(row.get('percent')), 1)
+                except (TypeError, ValueError):
+                    continue
+        return rarity
+
+    schema = _cached(cache, f'steam-esquema-{app_id}', load_schema)
+    rarity = _cached(cache, f'steam-raridade-{app_id}', load_rarity)
+    order = {name: index for index, name in enumerate(schema)}
+    items = []
+    for entry in sorted(entries, key=lambda e: order.get(e['apiname'], len(order))):
+        meta = schema.get(entry['apiname'], {})
+        earned = entry.get('achieved') == 1
+        items.append(_achievement(entry['apiname'], covers._text(meta.get('displayName') or entry.get('name'), 150), covers._text(meta.get('description') or entry.get('description'), 500),
+                                  earned, _stamp_from_epoch(entry.get('unlocktime')) if earned else None, _icon(meta.get('icon'), STEAM_ICON_HOSTS),
+                                  _icon(meta.get('icongray'), STEAM_ICON_HOSTS), rarity.get(entry['apiname']), hidden=meta.get('hidden') == 1))
+    return {'itens': items, 'obtidos': sum(1 for item in items if item['obtida']), 'total': len(items), 'escopo': 'jogo base', 'titulo': covers._text(stats.get('gameName'), 150)}
+
+
+def retro_achievement_list(config: dict, game_id: str, fetch=None) -> dict:
+    """Conquistas do conjunto com o progresso do usuário (API_GetGameInfoAndUserProgress), na ordem de exibição do site."""
+    if not re.fullmatch(r'[0-9]{1,9}', game_id):
+        raise SourceError('indisponivel', 'Identificador inválido para o RetroAchievements.')
+    result = _retro_call('API_GetGameInfoAndUserProgress', config, fetch, g=game_id, a=1)
+    if not isinstance(result, dict):
+        raise SourceError('indisponivel', 'Resposta inválida do RetroAchievements.')
+    rows = result.get('Achievements')
+    rows = list(rows.values()) if isinstance(rows, dict) else rows if isinstance(rows, list) else []
+    rows = [row for row in rows if isinstance(row, dict)]
+    if not rows:
+        raise SourceError('sem_conquistas', 'Este jogo não tem conjunto de conquistas no RetroAchievements.')
+    players = _int(result.get('NumDistinctPlayers', result.get('NumDistinctPlayersCasual')), 10 ** 9)
+    items = []
+    for row in sorted(rows, key=lambda r: _int(r.get('DisplayOrder'), 10 ** 6)):
+        badge = row.get('BadgeName')
+        badge = badge if isinstance(badge, str) and re.fullmatch(r'[0-9]{1,9}', badge) else None
+        raw_date = row.get('DateEarnedHardcore') or row.get('DateEarned')
+        earned_at = None
+        if isinstance(raw_date, str) and re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}', raw_date):
+            earned_at = raw_date.replace(' ', 'T') + '+00:00'
+        elif _text_day(raw_date):
+            earned_at = _text_day(raw_date)
+        awarded = _int(row.get('NumAwarded'), 10 ** 9)
+        items.append(_achievement(str(_int(row.get('ID'), 10 ** 9)), covers._text(row.get('Title'), 150), covers._text(row.get('Description'), 500), earned_at is not None, earned_at,
+                                  f'{RETRO_IMAGE_BASE}/Badge/{badge}.png' if badge else None, f'{RETRO_IMAGE_BASE}/Badge/{badge}_lock.png' if badge else None,
+                                  round(awarded * 100 / players, 1) if players and awarded else None, points=_int(row.get('Points'), 10000) or None))
+    return {'itens': items, 'obtidos': sum(1 for item in items if item['obtida']), 'total': len(items), 'escopo': 'jogo base', 'titulo': covers._text(result.get('Title'), 150)}
+
+
+def achievement_list(source: str, config: dict, external_id: str, fetch=None, cache=None) -> dict:
+    if source == 'steam':
+        return steam_achievement_list(config, external_id, fetch, cache)
+    if source == 'retroachievements':
+        return retro_achievement_list(config, external_id, fetch)
+    raise ValueError('Fonte de troféus desconhecida.')
+
+
+def record_counts(conn, user_id: int, game_id: int, source: str, earned: int, total: int, scope: str = 'jogo base') -> str:
+    """Grava obtidos/total vindos da fonte no jogo (mesma regra da sincronização) e devolve a data da consulta."""
+    stamp = datetime.now(timezone.utc).isoformat(timespec='seconds')
+    conn.execute("UPDATE jogos SET trofeus_obtidos=?, trofeus_total=?, trofeus_fonte=?, trofeus_escopo=?, trofeus_consultado_em=?, "
+                 "atualizado=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND usuario_id=?", (min(earned, total), total, source, scope, stamp, game_id, user_id))
+    return stamp

@@ -14,7 +14,7 @@ function formatDate(iso: string | null) { if (!iso) return '—'; const [y, m, d
  * Painel amplo de um favorito: o que muda com frequência (progresso, status, troféus obtidos, notas) é editado aqui e
  * salvo só ao clicar em Salvar; o resto abre o editor completo. Cancelar volta aos valores carregados.
  */
-export function FavoriteSpotlight({ gameId, collections, onBack, onEdit, onChanged }: { gameId: number; collections: Collection[]; onBack?: () => void; onEdit: () => void; onChanged: () => void }) {
+export function FavoriteSpotlight({ gameId, collections, onBack, onEdit, onTrophies, onChanged }: { gameId: number; collections: Collection[]; onBack?: () => void; onEdit: () => void; onTrophies?: () => void; onChanged: () => void }) {
   const { api } = useBackend();
   const [game, setGame] = useState<GameDetails | null>(null);
   const [draft, setDraft] = useState<{ progresso: number; status_avancado: string; trofeus_obtidos: number; notas: string } | null>(null);
@@ -74,6 +74,7 @@ export function FavoriteSpotlight({ gameId, collections, onBack, onEdit, onChang
           <Button variant="primary" disabled={!dirty || busy} onClick={() => void save()}><Save size={16} /> {busy ? 'Salvando…' : 'Salvar'}</Button>
           <Button disabled={!dirty || busy} onClick={() => { setDraft({ progresso: game.progresso, status_avancado: game.status_avancado, trofeus_obtidos: game.trofeus_obtidos, notas: game.notas }); setError(''); }}><Undo2 size={16} /> Cancelar</Button>
           <Button variant="ghost" disabled={busy} onClick={onEdit}><PencilLine size={16} /> Editor completo</Button>
+          {onTrophies && (game.fonte_externa === 'steam' || game.fonte_externa === 'retroachievements') && <Button variant="ghost" disabled={busy} onClick={onTrophies}><Trophy size={16} /> Ver troféus</Button>}
         </div>
       </div>
     </div>

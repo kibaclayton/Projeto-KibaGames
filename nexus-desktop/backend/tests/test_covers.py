@@ -92,7 +92,7 @@ def test_preview_is_proxied_only_for_source_image_hosts(tmp_path, monkeypatch):
         headers = profile(client)
         good = client.get('/api/capas/previa', params={'url': 'https://shared.cloudflare.steamstatic.com/a/library_600x900.jpg'}, headers=headers)
         assert good.status_code == 200 and good.headers['content-type'].startswith('image/jpeg') and good.content == b'\xff\xd8fake'
-        assert seen[0][1] == covers.STEAM_IMAGE_HOSTS | covers.WIKIPEDIA_IMAGE_HOSTS | covers.igdb.IMAGE_HOSTS | covers.RETRO_IMAGE_HOSTS and seen[0][2] == covers.MAX_PREVIEW_BYTES
+        assert seen[0][1] == covers.STEAM_IMAGE_HOSTS | covers.WIKIPEDIA_IMAGE_HOSTS | covers.igdb.IMAGE_HOSTS | covers.RETRO_IMAGE_HOSTS | covers.STEAM_ICON_HOSTS and seen[0][2] == covers.MAX_PREVIEW_BYTES
         assert client.get('/api/capas/previa', params={'url': 'https://evil.example/capa.jpg'}, headers=headers).status_code == 404
         assert client.get('/api/capas/previa', params={'url': 'http://upload.wikimedia.org/capa.jpg'}, headers=headers).status_code == 404
         assert client.get('/api/capas/previa', params={'url': 'https://upload.wikimedia.org/missing.jpg'}, headers=headers).status_code == 404

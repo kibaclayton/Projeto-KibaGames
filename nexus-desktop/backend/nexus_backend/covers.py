@@ -42,7 +42,8 @@ STEAM_IMAGE_BASE = 'https://shared.steamstatic.com/store_item_assets/steam/apps'
 WIKIPEDIA_HOSTS = {'pt.wikipedia.org', 'en.wikipedia.org'}
 WIKIDATA_HOSTS = {'www.wikidata.org'}
 WIKIPEDIA_IMAGE_HOSTS = {'upload.wikimedia.org'}
-RETRO_IMAGE_HOSTS = {'media.retroachievements.org'}  # capas dos jogos vinculados pelo RetroAchievements (trophies.py)
+RETRO_IMAGE_HOSTS = {'media.retroachievements.org'}  # capas e medalhas dos jogos vinculados pelo RetroAchievements (trophies.py)
+STEAM_ICON_HOSTS = {'steamcdn-a.akamaihd.net', 'media.steampowered.com'}  # ícones de conquistas da Steam fora do CDN de capas
 IMAGE_HOSTS = {'steam': STEAM_IMAGE_HOSTS, 'wikipedia': WIKIPEDIA_IMAGE_HOSTS, 'igdb': igdb.IMAGE_HOSTS, 'retroachievements': RETRO_IMAGE_HOSTS}
 # Famílias de plataforma para o filtro da busca; nomes vindos das fontes são comparados por estas expressões.
 FAMILY_PATTERNS = {
@@ -90,7 +91,7 @@ def _image_allowed(url: str, hosts: set[str]) -> bool:
 
 def fetch_preview(url: str) -> tuple[str, bytes]:
     """Prévia de um candidato, buscada pelo serviço: a interface nunca fala direto com os CDNs das fontes."""
-    hosts = STEAM_IMAGE_HOSTS | WIKIPEDIA_IMAGE_HOSTS | igdb.IMAGE_HOSTS | RETRO_IMAGE_HOSTS
+    hosts = STEAM_IMAGE_HOSTS | STEAM_ICON_HOSTS | WIKIPEDIA_IMAGE_HOSTS | igdb.IMAGE_HOSTS | RETRO_IMAGE_HOSTS
     if not _image_allowed(url, hosts):
         raise ValueError('Prévia fora das fontes permitidas.')
     return fetch(url, 'image/png,image/jpeg,image/webp', IMAGE_TYPES, MAX_PREVIEW_BYTES, hosts, 10)
