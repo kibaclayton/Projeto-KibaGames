@@ -434,7 +434,7 @@ def create_app(directory: Path | None = None):
             raise HTTPException(422, str(exc)) from exc
 
     @app.post('/api/imagens', status_code=201)
-    async def upload(request: Request, user_id: User, tipo: Literal['capa', 'avatar', 'colecao'] = 'capa',
+    async def upload(request: Request, user_id: User, tipo: Literal['capa', 'avatar', 'colecao', 'fundo'] = 'capa',
                      x: int | None = Query(None, ge=0), y: int | None = Query(None, ge=0),
                      largura: int | None = Query(None, gt=0), altura: int | None = Query(None, gt=0)):
         values = [x, y, largura, altura]
@@ -609,9 +609,16 @@ def create_app(directory: Path | None = None):
                     raise
         else:
             image_error = 'Esta fonte não tem capa para o jogo; escolha outra capa, um arquivo ou um link.'
+        background = None
+        if details.get('fundo'):
+            try:
+                background = process_image(user_id, 'fundo', download_cover(details, 'fundo'), None)
+            except (ValueError, OSError, http.client.HTTPException, HTTPException) as exc:
+                if isinstance(exc, HTTPException) and exc.status_code >= 500:
+                    raise  # sem fundo a página usa a capa desfocada
         with db.connection() as conn:
             duplicate = find_duplicate(conn, user_id, model.fonte, model.id, model.jogo_id)
-        return {'detalhes': details, 'imagem': image, 'erro_capa': image_error, 'duplicado_em': duplicate}
+        return {'detalhes': details, 'imagem': image, 'fundo': background, 'erro_capa': image_error, 'duplicado_em': duplicate}
 
     @app.post('/api/capas/completar')
     def cover_complete(user_id: User):
@@ -652,6 +659,12 @@ def create_app(directory: Path | None = None):
                 previous = game_result(owned(conn, 'jogos', row['id'], user_id))
                 current = {k: v for k, v in previous.items() if k in GameInput.model_fields}
                 changes = {'capa_id': image['id'], 'fonte_externa': 'steam', 'id_externo': exact[0]['id'], 'url_origem': details['origem']}
+                if details.get('fundo') and not current.get('fundo_id'):
+                    try:
+                        changes['fundo_id'] = process_image(user_id, 'fundo', download_cover(details, 'fundo'), None)['id']
+                    except (ValueError, OSError, http.client.HTTPException, HTTPException) as exc:
+                        if isinstance(exc, HTTPException) and exc.status_code >= 500:
+                            raise
                 for field, value in (('genero', details['genero']), ('data_lancamento', details['data_lancamento']), ('desenvolvedor', ', '.join(details['desenvolvedores'])[:200]),
                                      ('publicadora', ', '.join(details['publicadoras'])[:200]), ('descricao', details['descricao'])):
                     if value and not current.get(field):
@@ -789,6 +802,13 @@ def create_app(directory: Path | None = None):
             except (ValueError, OSError, http.client.HTTPException, HTTPException) as exc:
                 if isinstance(exc, HTTPException) and exc.status_code >= 500:
                     raise
+            background = None
+            if details and details.get('fundo'):
+                try:
+                    background = process_image(user_id, 'fundo', download_cover(details, 'fundo'), None)
+                except (ValueError, OSError, http.client.HTTPException, HTTPException) as exc:
+                    if isinstance(exc, HTTPException) and exc.status_code >= 500:
+                        raise
             earned = None
             if fonte == 'steam':
                 try:
@@ -797,7 +817,7 @@ def create_app(directory: Path | None = None):
                     earned = None
             elif item.get('trofeus_total'):
                 earned = {'obtidos': item['trofeus_obtidos'] or 0, 'total': item['trofeus_total'], 'escopo': 'jogo base'}
-            data = {'nome': (details or item)['titulo'], 'plataforma': item['plataforma'], 'capa_id': image['id'] if image else None,
+            data = {'nome': (details or item)['titulo'], 'plataforma': item['plataforma'], 'capa_id': image['id'] if image else None, 'fundo_id': background['id'] if background else None,
                     'fonte_externa': fonte, 'id_externo': external_id, 'url_origem': (details or item)['origem'],
                     'minutos_jogados': item.get('minutos') or 0, 'colecao_id': model.colecao_id}
             if details:

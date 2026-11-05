@@ -312,7 +312,7 @@ def retro_details(config: dict, game_id: str, fetch=None) -> dict:
     return covers._details('retroachievements', game_id, title, _retro_image(result.get('ImageBoxArt')) or _retro_image(result.get('ImageTitle')),
                            f'https://retroachievements.org/game/{game_id}', data_lancamento=day, ano=year, plataformas=[console] if console else [],
                            generos=covers._strings(genres), desenvolvedores=covers._strings([result.get('Developer')]),
-                           publicadoras=covers._strings([result.get('Publisher')]), descricao='')
+                           publicadoras=covers._strings([result.get('Publisher')]), descricao='', fundo=_retro_image(result.get('ImageIngame')) or _retro_image(result.get('ImageTitle')))
 
 
 # --- Fachada comum -----------------------------------------------------------------------------------------------------

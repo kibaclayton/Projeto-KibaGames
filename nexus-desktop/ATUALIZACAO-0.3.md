@@ -238,6 +238,16 @@ Pedidos do dia: "criar um visualizador de troféus que mostre os troféus de cad
 
 Testes: back-end **89** (`test_trophies.py`: ordem da fonte e ícones de hosts estranhos descartados, raridade em texto/número, cache do esquema, RetroAchievements com medalhas e datas, rota do visualizador gravando a contagem, capas em lote só com nome exato e sem tocar dados pessoais), front-end 30, TypeScript e build aprovados. Verificado no navegador com a biblioteca sintética: *Capas da Steam* aplicou a capa oficial de Hollow Knight (nome exato) e relatou os demais; o visualizador real depende da sua conta vinculada (testado com respostas simuladas).
 
+## Página do jogo no padrão Backloggd (04/11/2026)
+
+Pedido: "além das informações que já aparecem, coloque nesse padrão, adaptando essas atualizações no perfil do jogo" (referência: página de jogo do Backloggd). Esquema SQLite **v7** (`MIGRATIONS[7]`): `imagens.tipo` passa a aceitar `fundo` (a tabela é recriada com chaves estrangeiras desligadas e conferidas por `foreign_key_check` logo depois), `jogos.fundo_id` (imagem de fundo) e `jogos.nota` (1 a 5 estrelas).
+
+1. **Tocar num card abre a página do jogo** (`src/features/library/GameDetail.tsx`): imagem de fundo larga (captura da Steam/IGDB/RetroAchievements ou, sem ela, a capa desfocada), capa em destaque com ações rápidas (nota em estrelas, Favoritar, Status, Editar jogo, Ver troféus), título, "por estúdio, publicadora", selo "Lançado dd/mm/aaaa", descrição, gêneros, plataforma com classificação indicativa e Metacritic, coleção, link "Mais informações" na fonte, blocos de números (troféus com barra, progresso, tempo jogado, jornada com dias e sessões), tempos de jogo (história/extras/100%, quando a IGDB os traz), idiomas, categorias, requisitos (recolhível) e as suas notas. Nota, favorito e status são salvos na hora; o resto continua no editor, que abre a partir da página.
+2. **Imagem de fundo**: `covers.steam_details` lê `screenshots` (primeira captura em host da Steam), a IGDB `screenshots.image_id` e o RetroAchievements `ImageIngame`; aplicar um resultado, importar pela conta e as capas em lote guardam a imagem como tipo `fundo` (1600×900) e só a usam quando o jogo ainda não tem uma. "Remover fundo" fica no editor; a limpeza de órfãs preserva fundos em uso.
+3. **Nota pessoal** (`StarRating.tsx`): 1 a 5 estrelas, clique na estrela atual limpa; teclado com setas e Delete; aparece no editor e na página do jogo.
+
+Testes: back-end **90** (`test_ficha.py`: migração 6→7 com imagens e referências preservadas e chaves estrangeiras íntegras, captura da Steam como fundo só de hosts permitidos, aplicar guardando o fundo, validação de nota e de tipo de imagem, órfãs respeitando o fundo), front-end 30, TypeScript e build aprovados. Verificado no navegador com a biblioteca sintética: a página de Cyberpunk 2077 mostra capa, estúdio, lançamento, descrição, gêneros, plataforma, classificação, Metacritic, troféus, idiomas, categorias e requisitos.
+
 ## Migração real: pendência externa (resolvida em 24/10/2026; histórico)
 
 O importador foi implementado e testado com bases isoladas, mas **os dados pessoais ainda não foram importados**. Este ambiente recebeu `PermissionError / WinError 5` ao ler `%LOCALAPPDATA%/NexusPlay/conexao.dat`. Nenhuma tentativa alterou o MySQL original.

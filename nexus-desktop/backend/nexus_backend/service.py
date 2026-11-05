@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from .database import normalize
 from .models import Ficha, GameInput
 
-SUMMARY_COLUMNS = 'id,nome,plataforma,progresso,capa_id,data_inicio,data_termino,ordem,favorito,colecao_id,trofeus_obtidos,trofeus_total,status_avancado,genero,minutos_jogados,data_lancamento,desenvolvedor,publicadora,fonte_externa,id_externo,ainda_jogando,posicao,trofeus_fonte,atualizado'
+SUMMARY_COLUMNS = 'id,nome,plataforma,progresso,capa_id,fundo_id,nota,data_inicio,data_termino,ordem,favorito,colecao_id,trofeus_obtidos,trofeus_total,status_avancado,genero,minutos_jogados,data_lancamento,desenvolvedor,publicadora,fonte_externa,id_externo,ainda_jogando,posicao,trofeus_fonte,atualizado'
 
 
 def owned(conn, table, row_id, user_id):
@@ -50,6 +50,7 @@ def game_values(model: GameInput):
 
 def save_game(conn, model: GameInput, user_id: int, game_id: int | None = None):
     validate_image(conn, model.capa_id, user_id, 'capa')
+    validate_image(conn, model.fundo_id, user_id, 'fundo')
     if model.colecao_id:
         owned(conn, 'colecoes', model.colecao_id, user_id)
     values = game_values(model)

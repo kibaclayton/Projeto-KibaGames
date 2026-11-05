@@ -137,6 +137,9 @@ class GameInput(Model):
     trofeus_escopo: str = Field(default='', max_length=40)
     trofeus_consultado_em: str | None = Field(default=None, max_length=40)
     ficha: Ficha = Field(default_factory=Ficha)
+    # Página do jogo: imagem de fundo (captura ou arte da fonte) e nota pessoal de 1 a 5 estrelas (None = sem nota).
+    fundo_id: str | None = Field(default=None, pattern=r'^[a-f0-9]{64}$')
+    nota: int | None = Field(default=None, ge=1, le=5)
 
     @field_validator('nome', 'plataforma')
     @classmethod
@@ -250,5 +253,5 @@ class TrophySyncInput(Model):
 
 class RemoteImage(Model):
     url: str = Field(min_length=8, max_length=2048)
-    tipo: Literal['capa', 'avatar', 'colecao'] = 'capa'
+    tipo: Literal['capa', 'avatar', 'colecao', 'fundo'] = 'capa'
     recorte: Crop | None = None

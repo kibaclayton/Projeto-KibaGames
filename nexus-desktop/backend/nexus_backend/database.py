@@ -4,7 +4,7 @@ import os
 import sqlite3
 import unicodedata
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 def normalize(value: str) -> str:
@@ -118,7 +118,26 @@ PRAGMA user_version = 5;
 ALTER TABLE jogos ADD COLUMN ficha TEXT NOT NULL DEFAULT '{}';
 PRAGMA user_version = 6;
 """,
+    # Página do jogo: imagem de fundo (captura/arte da fonte, tipo 'fundo') e nota pessoal de 1 a 5 estrelas. A restrição
+    # CHECK de `imagens.tipo` exige recriar a tabela; a migração roda com chaves estrangeiras desligadas (ver initialize).
+    7: """
+CREATE TABLE imagens_v7 (
+ id TEXT PRIMARY KEY, usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+ tipo TEXT NOT NULL CHECK(tipo IN ('capa','avatar','colecao','fundo')),
+ largura INTEGER NOT NULL, altura INTEGER NOT NULL, bytes INTEGER NOT NULL
+);
+INSERT INTO imagens_v7(id,usuario_id,tipo,largura,altura,bytes) SELECT id,usuario_id,tipo,largura,altura,bytes FROM imagens;
+DROP TABLE imagens;
+ALTER TABLE imagens_v7 RENAME TO imagens;
+CREATE INDEX idx_imagens_usuario ON imagens(usuario_id);
+ALTER TABLE jogos ADD COLUMN fundo_id TEXT REFERENCES imagens(id);
+ALTER TABLE jogos ADD COLUMN nota INTEGER CHECK(nota BETWEEN 1 AND 5);
+PRAGMA user_version = 7;
+""",
 }
+# Migrações que recriam tabelas referenciadas: precisam de PRAGMA foreign_keys=OFF fora da transação; a verificação
+# foreign_key_check roda logo depois e qualquer pendência interrompe a abertura.
+MIGRATIONS_WITHOUT_FK = {7}
 
 
 class Database:
@@ -152,5 +171,15 @@ class Database:
                 conn.executescript('BEGIN IMMEDIATE;\n' + SCHEMA + '\nCOMMIT;')
                 version = 1
             for target in range(version + 1, SCHEMA_VERSION + 1):
-                conn.executescript('BEGIN IMMEDIATE;\n' + MIGRATIONS[target] + '\nCOMMIT;')
+                if target in MIGRATIONS_WITHOUT_FK:
+                    conn.execute('PRAGMA foreign_keys=OFF')
+                    try:
+                        conn.executescript('BEGIN IMMEDIATE;\n' + MIGRATIONS[target] + '\nCOMMIT;')
+                        problems = conn.execute('PRAGMA foreign_key_check').fetchall()
+                        if problems:
+                            raise RuntimeError(f'Migração {target} deixou referências pendentes: {problems[:3]}')
+                    finally:
+                        conn.execute('PRAGMA foreign_keys=ON')
+                else:
+                    conn.executescript('BEGIN IMMEDIATE;\n' + MIGRATIONS[target] + '\nCOMMIT;')
 

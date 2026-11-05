@@ -27,6 +27,8 @@ export interface Game {
   data_lancamento: string | null; desenvolvedor: string; publicadora: string; fonte_externa: '' | ExternalSource; id_externo: string;
   // Jornada em andamento (sem término), posição na ordem manual da biblioteca e origem do total de troféus.
   ainda_jogando: boolean; posicao: number | null; trofeus_fonte: string;
+  // Página do jogo: imagem de fundo (captura da fonte) e nota pessoal de 1 a 5 estrelas.
+  fundo_id: string | null; nota: number | null;
 }
 /** Ficha completa da obra (requisitos, idiomas, classificação indicativa, tempo de jogo em minutos, Metacritic, categorias); editável, nunca pessoal. */
 export interface Ficha {
@@ -76,10 +78,10 @@ export interface CoverSearch { itens: CoverCandidate[]; avisos: string[]; igdb_c
 export interface ExternalDetails {
   fonte: CoverSource; id: string; titulo: string; imagem: string | null; origem: string; data_lancamento: string | null; ano: number | null;
   plataformas: string[]; plataformas_nexus: string[]; generos: string[]; genero: string; desenvolvedores: string[]; publicadoras: string[]; descricao: string; atribuicao: string;
-  trofeus_total: number | null; trofeus_fonte: string; trofeus_escopo: string; trofeus_consultado_em: string | null; ficha: Ficha;
+  trofeus_total: number | null; trofeus_fonte: string; trofeus_escopo: string; trofeus_consultado_em: string | null; ficha: Ficha; fundo: string | null;
 }
 export interface DuplicateRef { id: number; nome: string; plataforma: string }
-export interface ApplyResult { detalhes: ExternalDetails; imagem: ImageResult | null; erro_capa: string; duplicado_em: DuplicateRef | null }
+export interface ApplyResult { detalhes: ExternalDetails; imagem: ImageResult | null; fundo: ImageResult | null; erro_capa: string; duplicado_em: DuplicateRef | null }
 
 export class ApiError extends Error {
   constructor(message: string, public status: number) { super(message); }

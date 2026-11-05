@@ -159,6 +159,7 @@ def details(config: dict, external_id: str, fetch=fetch) -> dict:
     return {
         'titulo': title[:150], 'imagem': cover_url(cover) if isinstance(cover, str) and re.fullmatch(r'[a-z0-9]+', cover) else None,
         'ficha': time_to_beat(config, external_id, fetch),
+        'fundo': next((cover_url(s['image_id'], 't_screenshot_big') for s in game.get('screenshots', []) if isinstance(s, dict) and isinstance(s.get('image_id'), str) and re.fullmatch(r'[a-z0-9]+', s['image_id'])), None) if isinstance(game.get('screenshots'), list) else None,
         'origem': game.get('url') if isinstance(game.get('url'), str) and game['url'].startswith('https://www.igdb.com/') else f'https://www.igdb.com/games/{external_id}',
         'data_lancamento': _date(game.get('first_release_date')), 'ano': _year(game.get('first_release_date')),
         'plataformas': [p['name'] for p in game.get('platforms', []) if isinstance(p, dict) and isinstance(p.get('name'), str)][:8],

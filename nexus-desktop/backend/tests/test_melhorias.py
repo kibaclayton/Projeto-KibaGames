@@ -155,7 +155,7 @@ def test_migration_to_schema_5_keeps_games_and_seeds_positions_and_gallery(tmp_p
     conn.commit(); conn.close()
     db.initialize()
     with db.connection() as conn:
-        assert conn.execute('PRAGMA user_version').fetchone()[0] == SCHEMA_VERSION == 6
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == SCHEMA_VERSION == 7
         rows = [dict(r) for r in conn.execute('SELECT nome, posicao, ainda_jogando, trofeus_fonte FROM jogos ORDER BY posicao')]
         assert [r['nome'] for r in rows] == ['B', 'A'] and rows[0]['posicao'] == 1 and rows[0]['ainda_jogando'] == 0 and rows[0]['trofeus_fonte'] == ''
         assert dict(conn.execute('SELECT usuario_id, posicao, imagem_id FROM avatares').fetchone()) == {'usuario_id': 1, 'posicao': 1, 'imagem_id': 'a' * 64}

@@ -17,7 +17,7 @@ from .models import Crop
 
 MAX_BYTES = 10 * 1024 * 1024
 MAX_PIXELS = 20_000_000
-SIZES = {'capa': (900, 1200), 'colecao': (900, 900), 'avatar': (512, 512)}
+SIZES = {'capa': (900, 1200), 'colecao': (900, 900), 'avatar': (512, 512), 'fundo': (1600, 900)}
 IMAGE_SLOTS = threading.BoundedSemaphore(2)
 
 
@@ -131,7 +131,7 @@ def convert_image(data: bytes, kind: str, crop: Crop | None = None) -> tuple[byt
             full = io.BytesIO()
             picture.save(full, 'WEBP', quality=85, method=4, exif=b'')
             thumbnail = picture.copy()
-            thumbnail.thumbnail((240, 320) if kind == 'capa' else (160, 160), Image.Resampling.LANCZOS)
+            thumbnail.thumbnail((240, 320) if kind == 'capa' else (320, 180) if kind == 'fundo' else (160, 160), Image.Resampling.LANCZOS)
             small = io.BytesIO()
             thumbnail.save(small, 'WEBP', quality=85, method=4, exif=b'')
             return full.getvalue(), small.getvalue(), picture.width, picture.height

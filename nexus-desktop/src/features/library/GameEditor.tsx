@@ -7,6 +7,7 @@ import { CoverImage } from './CoverImage';
 import { CoverSearch } from './CoverSearch';
 import { applyChanges, candidateKey, fillSummary, mergeDetails, safeHttpsUrl, type FillChange } from './coverModel';
 import { GameCalendar } from './GameCalendar';
+import { StarRating } from './StarRating';
 import { FICHA_KEYS, blankGame, fichaCount, gamePayload, trophies } from './model';
 import { journeyDays, playedDays, type Schedule } from './schedule';
 
@@ -100,7 +101,9 @@ export function GameEditor({ gameId, collections, onClose, onSaved }: { gameId: 
     try {
       const result = await api.applyCandidate(candidate.fonte, candidate.id, gameId);
       const merged = mergeDetails(form, result.detalhes, { isNew: gameId === null, touched: touched.current });
-      const next = result.imagem ? { ...merged.form, capa_id: result.imagem.id } : merged.form;
+      const withCover = result.imagem ? { ...merged.form, capa_id: result.imagem.id } : merged.form;
+      // A imagem de fundo da página do jogo só entra quando ainda não há uma; nunca substitui a que você já tinha.
+      const next = result.fundo && !withCover.fundo_id ? { ...withCover, fundo_id: result.fundo.id } : withCover;
       setForm(next); setDirty(true);
       setApplied(result.imagem ? { id: result.imagem.id, key: candidateKey(candidate) } : null);
       setAutoOff(true); setAutoNote('');
@@ -149,6 +152,8 @@ export function GameEditor({ gameId, collections, onClose, onSaved }: { gameId: 
           <label htmlFor="game-progress" className="field-label">Progresso <span>{form.progresso}%</span></label><input id="game-progress" type="range" min={0} max={100} value={form.progresso} onChange={e => field('progresso', Number(e.target.value))} />
           <label htmlFor="game-status" className="field-label">Status</label><select id="game-status" className="input" value={form.status_avancado} onChange={e => field('status_avancado', e.target.value)}><option value="">Automático pelo progresso</option>{Array.from(new Set(['Jogando', 'Na fila', 'Pausado', 'Concluído', 'Abandonado', form.status_avancado])).filter(Boolean).map(s => <option key={s}>{s}</option>)}</select>
           <div className="field-pair"><div><label htmlFor="game-collection" className="field-label">Coleção</label><select id="game-collection" className="input" value={form.colecao_id ?? ''} onChange={e => field('colecao_id', e.target.value ? Number(e.target.value) : null)}><option value="">Sem coleção</option>{collections.map(c => <option value={c.id} key={c.id}>{c.nome}</option>)}</select></div><div><label htmlFor="game-order" className="field-label">Ordem na coleção</label><input id="game-order" className="input" type="number" min={1} max={9999} value={form.ordem} onChange={e => field('ordem', Number(e.target.value))} required /></div></div>
+          <span className="field-label" id="game-rating-label">Minha nota</span>
+          <StarRating value={form.nota} onChange={value => field('nota', value)} labelledBy="game-rating-label" />
           <label htmlFor="game-notes" className="field-label">Notas</label><textarea id="game-notes" className="input notes-input" value={form.notas} onChange={e => field('notas', e.target.value)} maxLength={100000} />
           <h3 className="trophy-heading"><BookOpen size={17} /> Ficha do jogo</h3>
           <div className="field-pair"><div><label htmlFor="game-release" className="field-label">Lançamento</label><input id="game-release" className="input" type="date" value={form.data_lancamento ?? ''} onChange={e => field('data_lancamento', e.target.value || null)} /></div><div><label htmlFor="game-developer" className="field-label">Desenvolvedor</label><input id="game-developer" className="input" value={form.desenvolvedor} onChange={e => field('desenvolvedor', e.target.value)} maxLength={200} /></div></div>
@@ -168,7 +173,7 @@ export function GameEditor({ gameId, collections, onClose, onSaved }: { gameId: 
             <label htmlFor="ficha-rec" className="field-label">Requisitos recomendados</label><textarea id="ficha-rec" className="input requirements-input" value={form.ficha.requisitos_recomendados} onChange={e => fichaField('requisitos_recomendados', e.target.value)} maxLength={3000} />
           </details>
         </div>
-        <div><div className="editor-cover"><CoverImage imageId={form.capa_id} name={form.nome || 'Novo jogo'} full /></div><div className="control-row"><label className="button button-secondary upload-button"><ImagePlus size={16} /> Escolher capa<input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={e => { const selected = e.target.files?.[0]; if (selected) void image(selected); e.target.value = ''; }} /></label><Button onClick={removeCover} disabled={!form.capa_id}>Remover capa</Button></div>
+        <div><div className="editor-cover"><CoverImage imageId={form.capa_id} name={form.nome || 'Novo jogo'} full /></div><div className="control-row"><label className="button button-secondary upload-button"><ImagePlus size={16} /> Escolher capa<input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={e => { const selected = e.target.files?.[0]; if (selected) void image(selected); e.target.value = ''; }} /></label><Button onClick={removeCover} disabled={!form.capa_id}>Remover capa</Button>{form.fundo_id && <Button onClick={() => field('fundo_id', null)}>Remover fundo</Button>}</div>
           {(autoBusy || autoNote) && <p role="status" className={`muted cover-auto-note ${autoBusy ? 'is-busy' : ''}`}><Search size={14} /> {autoBusy ? 'Procurando a capa pelo nome…' : autoNote}</p>}
           <p role="status" aria-live="polite" className="muted cover-auto-note fill-note">{fillNote && <><CheckCircle2 size={14} /> {fillNote}</>}</p>
           <CoverSearch query={form.nome} auto={!form.capa_id || form.capa_id === applied?.id} busy={busy || autoBusy} selectedKey={applied?.key ?? null} onPick={pickCover} onResults={(ranked, query) => void autoCoverFrom(ranked, query)} />

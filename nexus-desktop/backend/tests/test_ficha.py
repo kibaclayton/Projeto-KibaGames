@@ -82,6 +82,54 @@ def test_sheet_is_saved_validated_and_survives_migration_from_schema_5(tmp_path)
     conn.commit(); conn.close()
     db.initialize()
     with db.connection() as conn:
-        assert conn.execute('PRAGMA user_version').fetchone()[0] == SCHEMA_VERSION == 6
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == SCHEMA_VERSION == 7
         row = dict(conn.execute('SELECT nome, progresso, ficha FROM jogos').fetchone())
     assert row['nome'] == 'Control' and row['progresso'] == 30 and json.loads(row['ficha']) == {}
+
+
+def test_game_page_background_and_rating_survive_migration_7_and_orphan_cleanup(tmp_path, monkeypatch):
+    from tests.test_api import image_bytes
+    from nexus_backend import maintenance
+    # Banco na v6 com imagens e referências: a migração 7 recria `imagens` (tipo 'fundo') sem perder nenhuma linha.
+    (tmp_path / 'antiga').mkdir()
+    db = Database(tmp_path / 'antiga')
+    conn = sqlite3.connect(db.path)
+    conn.executescript('BEGIN;' + SCHEMA + 'COMMIT;')
+    for target in (2, 3, 4, 5, 6):
+        conn.executescript('BEGIN;' + MIGRATIONS[target] + 'COMMIT;')
+    conn.execute("INSERT INTO usuarios(id,nome,nome_chave,senha_hash) VALUES(1,'Clayton','clayton','x')")
+    conn.execute("INSERT INTO imagens(id,usuario_id,tipo,largura,altura,bytes) VALUES('" + 'a' * 64 + "',1,'capa',10,10,10)")
+    conn.execute("INSERT INTO jogos(usuario_id,nome,nome_chave,plataforma,capa_id,posicao) VALUES(1,'Control','control','PC','" + 'a' * 64 + "',1)")
+    conn.commit(); conn.close()
+    db.initialize()
+    with db.connection() as conn:
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == 7 and conn.execute('PRAGMA foreign_key_check').fetchall() == []
+        assert conn.execute('SELECT capa_id, fundo_id, nota FROM jogos').fetchone()[0] == 'a' * 64
+        assert conn.execute("SELECT count(*) FROM imagens").fetchone()[0] == 1
+        conn.execute("INSERT INTO imagens(id,usuario_id,tipo,largura,altura,bytes) VALUES('" + 'b' * 64 + "',1,'fundo',16,9,10)")
+        assert conn.execute('PRAGMA foreign_keys').fetchone()[0] == 1, 'foreign keys are back on after the rebuild'
+    # Pela API: a ficha da Steam traz uma captura como fundo, aplicar guarda a imagem tipo 'fundo', a nota aceita 1..5 e a limpeza de órfãs respeita o fundo.
+    steam = {'1091500': {'success': True, 'data': {'name': 'Cyberpunk 2077', 'screenshots': [{'id': 0, 'path_full': 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1091500/ss_1.1920x1080.jpg'}, {'id': 1, 'path_full': 'https://evil.example/x.jpg'}]}}}
+
+    def fetch(url, accept, content_types, max_bytes, allowed_hosts=None, seconds=25, method='GET', body=None, headers=None):
+        if url.endswith('.jpg'):
+            return 'image/png', image_bytes((1920, 1080) if 'ss_1' in url else (600, 900))
+        return 'application/json', json.dumps(steam).encode()
+    monkeypatch.setattr(covers, 'fetch', fetch)
+    with TestClient(create_app(tmp_path), client=('127.0.0.1', 5000)) as client:
+        _, headers = profile(client)
+        details = covers.steam_details('1091500', fake_fetch({'https://store.steampowered.com/api/appdetails': steam}))
+        assert details['fundo'] == 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1091500/ss_1.1920x1080.jpg', 'the first screenshot on a Steam host'
+        applied = client.post('/api/capas/aplicar', headers=headers, json={'fonte': 'steam', 'id': '1091500'}).json()
+        assert applied['fundo'] and applied['fundo']['tipo'] == 'fundo' and applied['fundo']['largura'] == 1600 and applied['imagem']['tipo'] == 'capa'
+        game = client.post('/api/jogos', headers=headers, json={'nome': 'Cyberpunk 2077', 'capa_id': applied['imagem']['id'], 'fundo_id': applied['fundo']['id'], 'nota': 5})
+        assert game.status_code == 201, game.text
+        assert game.json()['fundo_id'] == applied['fundo']['id'] and game.json()['nota'] == 5
+        assert client.post('/api/jogos', headers=headers, json={'nome': 'x', 'nota': 6}).status_code == 422
+        assert client.post('/api/jogos', headers=headers, json={'nome': 'x', 'fundo_id': applied['imagem']['id']}).status_code == 422, 'a cover cannot be used as background'
+        listed = client.get('/api/jogos', headers=headers).json()['itens'][0]
+        assert listed['fundo_id'] == applied['fundo']['id'] and listed['nota'] == 5
+        report = maintenance.find_orphans(client.app.state.db)
+        assert report['registros'] == 0, 'the background in use is not an orphan'
+        client.patch(f'/api/jogos/{game.json()["id"]}', headers=headers, json={'fundo_id': None, 'nota': None})
+        assert maintenance.find_orphans(client.app.state.db)['registros'] == 1, 'removing the background from the game leaves the file for the cleanup'

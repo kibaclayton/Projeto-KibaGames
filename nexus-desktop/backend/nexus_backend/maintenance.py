@@ -226,6 +226,7 @@ SELECT id, bytes FROM imagens WHERE id NOT IN (SELECT capa_id FROM jogos WHERE c
  AND id NOT IN (SELECT avatar_id FROM usuarios WHERE avatar_id IS NOT NULL)
  AND id NOT IN (SELECT capa_id FROM colecoes WHERE capa_id IS NOT NULL)
  AND id NOT IN (SELECT imagem_id FROM avatares)
+ AND id NOT IN (SELECT fundo_id FROM jogos WHERE fundo_id IS NOT NULL)
 """
 
 

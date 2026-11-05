@@ -97,11 +97,11 @@ def fetch_preview(url: str) -> tuple[str, bytes]:
     return fetch(url, 'image/png,image/jpeg,image/webp', IMAGE_TYPES, MAX_PREVIEW_BYTES, hosts, 10)
 
 
-def download_cover(details: dict) -> bytes:
-    """Baixa a capa de uma ficha de detalhes; a URL foi montada pelo serviço e precisa estar nos hosts da própria fonte."""
-    url, hosts = details.get('imagem') or '', IMAGE_HOSTS.get(details.get('fonte'), set())
+def download_cover(details: dict, key: str = 'imagem') -> bytes:
+    """Baixa a capa (`imagem`) ou a imagem de fundo (`fundo`) de uma ficha; a URL foi montada pelo serviço e precisa estar nos hosts da fonte."""
+    url, hosts = details.get(key) or '', IMAGE_HOSTS.get(details.get('fonte'), set())
     if not _image_allowed(url, hosts):
-        raise ValueError('Esta fonte não oferece uma capa para o jogo.')
+        raise ValueError('Esta fonte não oferece uma capa para o jogo.' if key == 'imagem' else 'Esta fonte não oferece uma imagem de fundo para o jogo.')
     return fetch(url, 'image/png,image/jpeg,image/webp', IMAGE_TYPES, MAX_BYTES, hosts)[1]
 
 
@@ -205,6 +205,8 @@ def _details(source: str, external_id: str, title: str, image: str | None, origi
             'descricao': extra.get('descricao', ''), 'atribuicao': SOURCE_ATTRIBUTION[source], 'parcial': bool(extra.get('parcial', False)),
             # Ficha completa (requisitos, idiomas, classificação, tempo de jogo, categorias), já validada nos limites do modelo.
             'ficha': Ficha.model_validate(extra.get('ficha') or {}).model_dump(),
+            # Imagem de fundo da página do jogo (captura ou arte larga), só de hosts da própria fonte.
+            'fundo': extra.get('fundo') if _image_allowed(extra.get('fundo') or '', IMAGE_HOSTS.get(source, set())) else None,
             # Total de troféus/conquistas da edição consultada, quando a fonte o publica; zero ou ausência viram "não informado" (None).
             'trofeus_total': extra.get('trofeus_total'), 'trofeus_fonte': source if extra.get('trofeus_total') else '',
             'trofeus_escopo': 'jogo base' if extra.get('trofeus_total') else '',
@@ -242,7 +244,7 @@ def steam_details(app_id: str, fetch_json=fetch_json) -> dict:
         raise ValueError('Identificador inválido para a Steam.')
     url = 'https://store.steampowered.com/api/appdetails?' + urlencode({'appids': app_id, 'l': 'portuguese', 'cc': 'BR',
                                                                         'filters': 'basic,genres,release_date,developers,publishers,platforms,achievements,'
-                                                                                   'pc_requirements,supported_languages,ratings,metacritic,categories'})
+                                                                                   'pc_requirements,supported_languages,ratings,metacritic,categories,screenshots'})
     entry = fetch_json(url, STEAM_HOSTS).get(app_id)
     data = entry.get('data') if isinstance(entry, dict) and entry.get('success') else None
     if not isinstance(data, dict) or not isinstance(data.get('name'), str):
@@ -261,10 +263,12 @@ def steam_details(app_id: str, fetch_json=fetch_json) -> dict:
     ficha = {'requisitos_minimos': _html_lines(requirements.get('minimum'), 3000), 'requisitos_recomendados': _html_lines(requirements.get('recommended'), 3000),
              'idiomas': _languages(data.get('supported_languages')), 'classificacao': rating, 'classificacao_detalhe': rating_detail,
              'metacritic': metacritic if type(metacritic) is int and 0 <= metacritic <= 100 else None, 'categorias': _strings(categories, 30)}
+    shots = [s.get('path_full') for s in data.get('screenshots', []) if isinstance(s, dict)] if isinstance(data.get('screenshots'), list) else []
+    background = next((s for s in shots if isinstance(s, str) and _image_allowed(s, STEAM_IMAGE_HOSTS)), None)
     return _details('steam', app_id, _text(data['name'], 150), steam_image(app_id), f'https://store.steampowered.com/app/{app_id}/',
                     data_lancamento=date, ano=year, plataformas=[label for key, label in STEAM_PLATFORM_LABELS.items() if flags.get(key)],
                     generos=_strings(genres), desenvolvedores=_strings(data.get('developers')), publicadoras=_strings(data.get('publishers')),
-                    descricao=_text(data.get('short_description'), MAX_DESCRIPTION), trofeus_total=trophies, ficha=ficha)
+                    descricao=_text(data.get('short_description'), MAX_DESCRIPTION), trofeus_total=trophies, ficha=ficha, fundo=background)
 
 
 # --- Wikipedia + Wikidata ----------------------------------------------------------------------------------------------
@@ -540,7 +544,7 @@ def game_details(source: str, external_id: str, fetch_json=fetch_json, cache: Ca
         raw = igdb.details(igdb_config, external_id)
         result = _details('igdb', external_id, raw['titulo'], raw['imagem'], raw['origem'], data_lancamento=raw['data_lancamento'], ano=raw['ano'],
                           plataformas=raw['plataformas'], generos=raw['generos'], desenvolvedores=raw['desenvolvedores'], publicadoras=raw['publicadoras'],
-                          descricao=_text(raw['descricao'], MAX_DESCRIPTION), ficha=raw.get('ficha'))
+                          descricao=_text(raw['descricao'], MAX_DESCRIPTION), ficha=raw.get('ficha'), fundo=raw.get('fundo'))
         if cache is not None:
             cache.set(key, result)
         return result
